@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2025-12-15
+
 ### Added
-- Changelog history tracking and AI-assisted merge functionality with history module initialization, updated changelog flow, and exported history API (2219c5d)
+- Version bump detection for changelog generation (7e509b3)
+- Changelog history tracking and AI-assisted merge functionality with history module and API exports (2219c5d)
 - Initial project skeleton with README and package configuration (6919578)
-- Changelog generation functionality (3e95f10)
-- Dist-based CLI build system (3e95f10)
-- OpenCode AI integration for commit messages and changelog generation (8e9deec)
+- Changelog generation and dist-based CLI build implementation (3e95f10)
+- OpenCode AI integration for commit messages and changelogs (8e9deec)
