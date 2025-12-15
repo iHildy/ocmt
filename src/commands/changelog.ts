@@ -1,6 +1,5 @@
-import chalk from "chalk";
-import inquirer from "inquirer";
-import ora from "ora";
+import * as p from "@clack/prompts";
+import color from "picocolors";
 import {
   isGitRepo,
   getReleases,
@@ -21,11 +20,11 @@ export interface ChangelogOptions {
  * - Generates a changelog up to the selected point
  */
 export async function changelogCommand(options: ChangelogOptions): Promise<void> {
-  console.log(chalk.yellow("\n[WIP] Changelog generation\n"));
+  p.intro(color.bgYellow(color.black(" changelog (WIP) ")));
 
   // Check if we're in a git repo
   if (!(await isGitRepo())) {
-    console.error(chalk.red("Error: Not a git repository"));
+    p.cancel("Not a git repository");
     process.exit(1);
   }
 
@@ -34,78 +33,79 @@ export async function changelogCommand(options: ChangelogOptions): Promise<void>
 
   // If no --from specified, show options to select
   if (!fromRef) {
-    const spinner = ora("Fetching releases and commits...").start();
+    const s = p.spinner();
+    s.start("Fetching releases and commits");
 
     const releases = await getReleases();
     const recentLog = await getLog({ limit: 20 });
     const recentCommits = recentLog.split("\n").filter(Boolean);
 
-    spinner.stop();
+    s.stop("Found releases and commits");
 
     // Build choices
-    const choices: Array<{ name: string; value: string }> = [];
+    type SelectOption = { value: string; label: string; hint?: string };
+    const selectOptions: SelectOption[] = [];
 
     if (releases.length > 0) {
-      choices.push(
-        new inquirer.Separator("--- Releases/Tags ---") as any,
-        ...releases.slice(0, 10).map((tag) => ({
-          name: `${chalk.green(tag)} (release)`,
+      releases.slice(0, 10).forEach((tag) => {
+        selectOptions.push({
           value: tag,
-        }))
-      );
+          label: tag,
+          hint: "release",
+        });
+      });
     }
 
     if (recentCommits.length > 0) {
-      choices.push(
-        new inquirer.Separator("--- Recent Commits ---") as any,
-        ...recentCommits.map((commit) => {
-          const [hash, ...msg] = commit.split(" ");
-          return {
-            name: `${chalk.yellow(hash)} ${msg.join(" ")}`,
-            value: hash,
-          };
-        })
-      );
+      recentCommits.forEach((commitLine) => {
+        const [hash, ...msg] = commitLine.split(" ");
+        selectOptions.push({
+          value: hash,
+          label: `${color.yellow(hash)} ${msg.join(" ")}`,
+        });
+      });
     }
 
-    if (choices.length === 0) {
-      console.log(chalk.yellow("No releases or commits found"));
+    if (selectOptions.length === 0) {
+      p.outro(color.yellow("No releases or commits found"));
       process.exit(0);
     }
 
-    const { selectedRef } = await inquirer.prompt([
-      {
-        type: "list",
-        name: "selectedRef",
-        message: "Select starting point for changelog:",
-        choices,
-        pageSize: 15,
-      },
-    ]);
+    const selectedRef = await p.select({
+      message: "Select starting point for changelog:",
+      options: selectOptions,
+    });
 
-    fromRef = selectedRef;
+    if (p.isCancel(selectedRef)) {
+      p.cancel("Aborted");
+      process.exit(0);
+    }
+
+    fromRef = selectedRef as string;
   }
 
   // Get commits between refs
-  const spinner = ora(`Fetching commits ${fromRef}..${toRef}...`).start();
+  const s = p.spinner();
+  s.start(`Fetching commits ${fromRef}..${toRef}`);
 
   try {
     const commits = await getCommitsBetween(fromRef!, toRef);
-    spinner.succeed(`Found ${commits.length} commits`);
+    s.stop(`Found ${commits.length} commits`);
 
     if (commits.length === 0) {
-      console.log(chalk.yellow("No commits found in the specified range"));
+      p.outro(color.yellow("No commits found in the specified range"));
       process.exit(0);
     }
 
     // Display commits
-    console.log(chalk.cyan("\nCommits to include in changelog:"));
-    commits.forEach((c) => {
-      console.log(chalk.dim(`  ${c.hash} ${c.message}`));
-    });
+    const commitsList = commits
+      .map((c) => color.dim(`  ${c.hash} ${c.message}`))
+      .join("\n");
+    p.log.info(`Commits to include in changelog:\n${commitsList}`);
 
     // Generate changelog
-    const generateSpinner = ora("Generating changelog...").start();
+    const genSpinner = p.spinner();
+    genSpinner.start("Generating changelog");
 
     try {
       const changelog = await generateChangelog({
@@ -114,39 +114,40 @@ export async function changelogCommand(options: ChangelogOptions): Promise<void>
         toRef,
       });
 
-      generateSpinner.succeed("Changelog generated");
+      genSpinner.stop("Changelog generated");
 
-      console.log(chalk.cyan("\n--- Generated Changelog ---\n"));
-      console.log(changelog);
-      console.log(chalk.cyan("\n--- End Changelog ---\n"));
+      p.log.step(`Generated Changelog:\n\n${changelog}`);
 
       // Ask what to do with it
-      const { action } = await inquirer.prompt([
-        {
-          type: "list",
-          name: "action",
-          message: "What would you like to do?",
-          choices: [
-            { name: "Copy to clipboard (not implemented)", value: "copy" },
-            { name: "Save to CHANGELOG.md (not implemented)", value: "save" },
-            { name: "Done", value: "done" },
-          ],
-        },
-      ]);
+      const action = await p.select({
+        message: "What would you like to do?",
+        options: [
+          { value: "copy", label: "Copy to clipboard", hint: "not implemented" },
+          { value: "save", label: "Save to CHANGELOG.md", hint: "not implemented" },
+          { value: "done", label: "Done" },
+        ],
+      });
+
+      if (p.isCancel(action)) {
+        p.cancel("Aborted");
+        process.exit(0);
+      }
 
       if (action === "copy") {
-        console.log(chalk.yellow("Clipboard copy not yet implemented"));
+        p.log.warn("Clipboard copy not yet implemented");
       } else if (action === "save") {
-        console.log(chalk.yellow("File save not yet implemented"));
+        p.log.warn("File save not yet implemented");
       }
+
+      p.outro(color.green("Done!"));
     } catch (error: any) {
-      generateSpinner.fail("Failed to generate changelog");
-      console.error(chalk.red(error.message));
+      genSpinner.stop("Failed to generate changelog");
+      p.cancel(error.message);
       process.exit(1);
     }
   } catch (error: any) {
-    spinner.fail("Failed to fetch commits");
-    console.error(chalk.red(error.message));
+    s.stop("Failed to fetch commits");
+    p.cancel(error.message);
     process.exit(1);
   }
 }

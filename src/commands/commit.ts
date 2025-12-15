@@ -1,6 +1,5 @@
-import chalk from "chalk";
-import inquirer from "inquirer";
-import ora from "ora";
+import * as p from "@clack/prompts";
+import color from "picocolors";
 import {
   isGitRepo,
   getStatus,
@@ -25,178 +24,173 @@ export interface CommitOptions {
  * - Commits with the generated/provided message
  */
 export async function commitCommand(options: CommitOptions): Promise<void> {
+  p.intro(color.bgCyan(color.black(" oc ")));
+
   // Check if we're in a git repo
   if (!(await isGitRepo())) {
-    console.error(chalk.red("Error: Not a git repository"));
+    p.cancel("Not a git repository");
     process.exit(1);
   }
 
   // Get current status
-  const status = await getStatus();
+  let status = await getStatus();
 
   // If --all flag, stage everything first
-  if (options.all) {
-    if (hasChanges(status)) {
-      const spinner = ora("Staging all changes...").start();
-      await stageAll();
-      spinner.succeed("All changes staged");
-      // Refresh status
-      const newStatus = await getStatus();
-      Object.assign(status, newStatus);
-    }
+  if (options.all && hasChanges(status)) {
+    const s = p.spinner();
+    s.start("Staging all changes");
+    await stageAll();
+    s.stop("All changes staged");
+    status = await getStatus();
   }
 
   // Check for staged changes
   if (status.staged.length === 0) {
     // No staged changes - check if there are unstaged changes
     if (status.unstaged.length === 0 && status.untracked.length === 0) {
-      console.log(chalk.yellow("Nothing to commit, working tree clean"));
+      p.outro(color.yellow("Nothing to commit, working tree clean"));
       process.exit(0);
     }
 
-    // Offer to stage changes
-    console.log(chalk.yellow("\nNo staged changes found."));
-    console.log("\nUnstaged/Untracked files:");
-    [...status.unstaged, ...status.untracked].forEach((file) => {
-      console.log(chalk.dim(`  ${file}`));
-    });
+    // Show unstaged/untracked files
+    p.log.warn("No staged changes found");
+    const unstagedFiles = [...status.unstaged, ...status.untracked]
+      .map((file) => `  ${color.dim(file)}`)
+      .join("\n");
+    p.log.info(`Unstaged/Untracked files:\n${unstagedFiles}`);
 
     if (!options.yes) {
-      const { shouldStage } = await inquirer.prompt([
-        {
-          type: "confirm",
-          name: "shouldStage",
-          message: "Would you like to stage all changes?",
-          default: true,
-        },
-      ]);
+      const shouldStage = await p.confirm({
+        message: "Stage all changes?",
+        initialValue: true,
+      });
 
-      if (!shouldStage) {
-        console.log(chalk.dim("Aborted. Stage changes with `git add` first."));
+      if (p.isCancel(shouldStage) || !shouldStage) {
+        p.cancel("Aborted. Stage changes with `git add` first.");
         process.exit(0);
       }
     }
 
-    const spinner = ora("Staging all changes...").start();
+    const s = p.spinner();
+    s.start("Staging all changes");
     await stageAll();
-    spinner.succeed("All changes staged");
-
-    // Refresh status
-    const newStatus = await getStatus();
-    Object.assign(status, newStatus);
+    s.stop("All changes staged");
+    status = await getStatus();
   }
 
   // Display staged files
-  console.log(chalk.green("\nStaged changes:"));
-  status.staged.forEach((file) => {
-    console.log(chalk.green(`  + ${file}`));
-  });
+  const stagedFiles = status.staged
+    .map((file) => `  ${color.green("+")} ${file}`)
+    .join("\n");
+  p.log.success(`Staged changes:\n${stagedFiles}`);
 
   // Get the diff
   const diff = await getStagedDiff();
 
   if (!diff) {
-    console.log(chalk.yellow("No diff content to analyze"));
+    p.outro(color.yellow("No diff content to analyze"));
     process.exit(0);
   }
 
   // Show diff summary
   const diffLines = diff.split("\n").length;
-  console.log(chalk.dim(`\nDiff: ${diffLines} lines`));
+  p.log.info(`Diff: ${diffLines} lines`);
 
   // If message provided, use it directly
   let commitMessage = options.message;
 
   if (!commitMessage) {
     // Generate commit message using AI
-    const spinner = ora("Generating commit message...").start();
+    const s = p.spinner();
+    s.start("Generating commit message");
 
     try {
       commitMessage = await generateCommitMessage({ diff });
-      spinner.succeed("Commit message generated");
+      s.stop("Commit message generated");
     } catch (error: any) {
-      spinner.fail("Failed to generate commit message");
-      console.error(chalk.red(error.message));
+      s.stop("Failed to generate commit message");
+      p.cancel(error.message);
       process.exit(1);
     }
   }
 
   // Show the commit message
-  console.log(chalk.cyan("\nProposed commit message:"));
-  console.log(chalk.white(`  "${commitMessage}"`));
+  p.log.step(`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`);
+
 
   // Confirm commit (unless --yes)
   if (!options.yes) {
-    const { action } = await inquirer.prompt([
-      {
-        type: "list",
-        name: "action",
-        message: "What would you like to do?",
-        choices: [
-          { name: "Commit with this message", value: "commit" },
-          { name: "Edit message", value: "edit" },
-          { name: "Regenerate message", value: "regenerate" },
-          { name: "Cancel", value: "cancel" },
-        ],
-      },
-    ]);
+    const action = await p.select({
+      message: "What would you like to do?",
+      options: [
+        { value: "commit", label: "Commit with this message" },
+        { value: "edit", label: "Edit message" },
+        { value: "regenerate", label: "Regenerate message" },
+        { value: "cancel", label: "Cancel" },
+      ],
+    });
 
-    if (action === "cancel") {
-      console.log(chalk.dim("Aborted."));
+    if (p.isCancel(action) || action === "cancel") {
+      p.cancel("Aborted");
       process.exit(0);
     }
 
     if (action === "edit") {
-      const { editedMessage } = await inquirer.prompt([
-        {
-          type: "input",
-          name: "editedMessage",
-          message: "Enter commit message:",
-          default: commitMessage,
+      const editedMessage = await p.text({
+        message: "Enter commit message:",
+        initialValue: commitMessage,
+        validate: (value) => {
+          if (!value.trim()) return "Commit message cannot be empty";
         },
-      ]);
+      });
+
+      if (p.isCancel(editedMessage)) {
+        p.cancel("Aborted");
+        process.exit(0);
+      }
+
       commitMessage = editedMessage;
     }
 
     if (action === "regenerate") {
-      const spinner = ora("Regenerating commit message...").start();
+      const s = p.spinner();
+      s.start("Regenerating commit message");
+
       try {
         commitMessage = await generateCommitMessage({ diff });
-        spinner.succeed("Commit message regenerated");
-        console.log(chalk.cyan("\nNew commit message:"));
-        console.log(chalk.white(`  "${commitMessage}"`));
-
-        const { confirmNew } = await inquirer.prompt([
-          {
-            type: "confirm",
-            name: "confirmNew",
-            message: "Use this message?",
-            default: true,
-          },
-        ]);
-
-        if (!confirmNew) {
-          console.log(chalk.dim("Aborted."));
-          process.exit(0);
-        }
+        s.stop("Commit message regenerated");
       } catch (error: any) {
-        spinner.fail("Failed to regenerate commit message");
-        console.error(chalk.red(error.message));
+        s.stop("Failed to regenerate commit message");
+        p.cancel(error.message);
         process.exit(1);
+      }
+
+      p.log.step(`New commit message:\n${color.white(`  "${commitMessage}"`)}`);
+
+
+      const confirmNew = await p.confirm({
+        message: "Use this message?",
+        initialValue: true,
+      });
+
+      if (p.isCancel(confirmNew) || !confirmNew) {
+        p.cancel("Aborted");
+        process.exit(0);
       }
     }
   }
 
   // Perform the commit
-  const spinner = ora("Committing...").start();
+  const s = p.spinner();
+  s.start("Committing");
 
   try {
     const result = await commit(commitMessage!);
-    spinner.succeed("Committed successfully!");
-    console.log(chalk.dim(result));
+    s.stop(`Committed successfully!\n${color.dim(result)}`);
+    p.outro(color.green("Done!"));
   } catch (error: any) {
-    spinner.fail("Commit failed");
-    console.error(chalk.red(error.message));
+    s.stop("Commit failed");
+    p.cancel(error.message);
     process.exit(1);
   }
 }

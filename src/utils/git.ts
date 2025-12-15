@@ -12,10 +12,10 @@ export interface GitStatus {
 /**
  * Execute a git command and return the output
  */
-export async function git(args: string): Promise<string> {
+export async function git(args: string, options?: { preserveWhitespace?: boolean }): Promise<string> {
   try {
     const { stdout } = await execAsync(`git ${args}`);
-    return stdout.trim();
+    return options?.preserveWhitespace ? stdout : stdout.trim();
   } catch (error: any) {
     throw new Error(`Git command failed: ${error.message}`);
   }
@@ -37,8 +37,9 @@ export async function isGitRepo(): Promise<boolean> {
  * Get the current git status
  */
 export async function getStatus(): Promise<GitStatus> {
-  const output = await git("status --porcelain");
-  const lines = output.split("\n").filter(Boolean);
+  // Preserve whitespace - leading spaces indicate index status
+  const output = await git("status --porcelain", { preserveWhitespace: true });
+  const lines = output.split("\n").filter((line) => line.length > 0);
 
   const staged: string[] = [];
   const unstaged: string[] = [];
