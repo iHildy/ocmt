@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "opencommit": "./dist/cli.js",
     "ocmt": "./dist/cli.js",
     "oc": "./dist/cli.js"
   },
@@ -24,10 +25,20 @@
     "ai",
     "opencode",
     "cli",
-    "changelog"
+    "changelog",
+    "conventional-commits",
+    "opencommit"
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sst/ocmt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sst/ocmt/issues"
+  },
+  "homepage": "https://github.com/sst/ocmt#readme",
   "files": [
     "dist",
     "src"
