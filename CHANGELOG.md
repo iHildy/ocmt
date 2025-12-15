@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.1] - 2025-12-15
 
 ### Added
+- Added release command and changelog workflow (19aef51)
 - Version bump detection for changelog generation (7e509b3)
 - Changelog history tracking and AI-assisted merge functionality with history module and API exports (2219c5d)
 - Initial project skeleton with README and package configuration (6919578)
