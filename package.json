@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "description": "AI-powered git commit message generator using opencode.ai",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "bin": {
-    "opencommit": "./src/cli.ts",
-    "ocmt": "./src/cli.ts",
-    "oc": "./src/cli.ts"
+    "ocmt": "./dist/cli.js",
+    "oc": "./dist/cli.js"
   },
   "scripts": {
-    "start": "bun src/cli.ts",
+    "start": "node dist/cli.js",
     "dev": "bun --watch src/cli.ts",
-    "build": "bun build src/cli.ts --outdir=dist --target=node --format=esm",
-    "build:compile": "bun build src/cli.ts --compile --outfile=dist/oc",
+    "build": "bun build src/cli.ts --outdir=dist --target=node --format=esm && bun build src/index.ts --outdir=dist --target=node --format=esm",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [
     "git",
@@ -23,8 +24,7 @@
     "ai",
     "opencode",
     "cli",
-    "changelog",
-    "bun"
+    "changelog"
   ],
   "author": "",
   "license": "MIT",

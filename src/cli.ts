@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { Command } from "commander";
 import { commitCommand } from "./commands/commit";
@@ -24,7 +24,7 @@ program
 program
   .command("changelog")
   .alias("cl")
-  .description("Generate changelog from commits (WIP)")
+  .description("Generate changelog from commits")
   .option("-f, --from <ref>", "Starting commit/tag reference")
   .option("-t, --to <ref>", "Ending commit/tag reference", "HEAD")
   .action(async (options) => {
