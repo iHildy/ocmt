@@ -110,6 +110,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     } catch (error: any) {
       s.stop("Failed to generate commit message");
       p.cancel(error.message);
+      cleanup();
       process.exit(1);
     }
   }
@@ -132,6 +133,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
     if (p.isCancel(action) || action === "cancel") {
       p.cancel("Aborted");
+      cleanup();
       process.exit(0);
     }
 
@@ -146,6 +148,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(editedMessage)) {
         p.cancel("Aborted");
+        cleanup();
         process.exit(0);
       }
 
@@ -162,6 +165,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
       } catch (error: any) {
         s.stop("Failed to regenerate commit message");
         p.cancel(error.message);
+        cleanup();
         process.exit(1);
       }
 
@@ -175,6 +179,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(confirmNew) || !confirmNew) {
         p.cancel("Aborted");
+        cleanup();
         process.exit(0);
       }
     }
