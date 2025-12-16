@@ -29,6 +29,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
   // Check if we're in a git repo
   if (!(await isGitRepo())) {
     p.cancel("Not a git repository");
+    cleanup();
     process.exit(1);
   }
 
@@ -49,6 +50,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     // No staged changes - check if there are unstaged changes
     if (status.unstaged.length === 0 && status.untracked.length === 0) {
       p.outro(color.yellow("Nothing to commit, working tree clean"));
+      cleanup();
       process.exit(0);
     }
 
@@ -67,6 +69,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(shouldStage) || !shouldStage) {
         p.cancel("Aborted. Stage changes with `git add` first.");
+        cleanup();
         process.exit(0);
       }
     }
@@ -89,6 +92,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
   if (!diff) {
     p.outro(color.yellow("No diff content to analyze"));
+    cleanup();
     process.exit(0);
   }
 
@@ -116,8 +120,9 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
   }
 
   // Show the commit message
-  p.log.step(`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`);
-
+  p.log.step(
+    `Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+  );
 
   // Confirm commit (unless --yes)
   if (!options.yes) {
@@ -170,7 +175,6 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
       }
 
       p.log.step(`New commit message:\n${color.white(`  "${commitMessage}"`)}`);
-
 
       const confirmNew = await p.confirm({
         message: "Use this message?",

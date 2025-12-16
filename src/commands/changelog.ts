@@ -147,6 +147,7 @@ export async function changelogCommand(options: ChangelogOptions): Promise<void>
   // Check if we're in a git repo
   if (!(await isGitRepo())) {
     p.cancel("Not a git repository");
+    cleanup();
     process.exit(1);
   }
 
@@ -204,6 +205,7 @@ export async function changelogCommand(options: ChangelogOptions): Promise<void>
 
     if (selectOptions.length === 0) {
       p.outro(color.yellow("No releases or commits found"));
+      cleanup();
       process.exit(0);
     }
 
