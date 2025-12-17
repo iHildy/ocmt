@@ -8,7 +8,7 @@ import {
   commit,
   type GitStatus,
 } from "../utils/git";
-import { generateCommitMessage } from "../lib/opencode";
+import { generateCommitMessage, cleanup } from "../lib/opencode";
 
 export interface CommitOptions {
   message?: string;
@@ -29,6 +29,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
   // Check if we're in a git repo
   if (!(await isGitRepo())) {
     p.cancel("Not a git repository");
+    cleanup();
     process.exit(1);
   }
 
@@ -49,6 +50,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     // No staged changes - check if there are unstaged changes
     if (status.unstaged.length === 0 && status.untracked.length === 0) {
       p.outro(color.yellow("Nothing to commit, working tree clean"));
+      cleanup();
       process.exit(0);
     }
 
@@ -67,6 +69,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(shouldStage) || !shouldStage) {
         p.cancel("Aborted. Stage changes with `git add` first.");
+        cleanup();
         process.exit(0);
       }
     }
@@ -89,6 +92,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
   if (!diff) {
     p.outro(color.yellow("No diff content to analyze"));
+    cleanup();
     process.exit(0);
   }
 
@@ -110,13 +114,15 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     } catch (error: any) {
       s.stop("Failed to generate commit message");
       p.cancel(error.message);
+      cleanup();
       process.exit(1);
     }
   }
 
   // Show the commit message
-  p.log.step(`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`);
-
+  p.log.step(
+    `Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+  );
 
   // Confirm commit (unless --yes)
   if (!options.yes) {
@@ -132,6 +138,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
     if (p.isCancel(action) || action === "cancel") {
       p.cancel("Aborted");
+      cleanup();
       process.exit(0);
     }
 
@@ -146,6 +153,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(editedMessage)) {
         p.cancel("Aborted");
+        cleanup();
         process.exit(0);
       }
 
@@ -162,11 +170,11 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
       } catch (error: any) {
         s.stop("Failed to regenerate commit message");
         p.cancel(error.message);
+        cleanup();
         process.exit(1);
       }
 
       p.log.step(`New commit message:\n${color.white(`  "${commitMessage}"`)}`);
-
 
       const confirmNew = await p.confirm({
         message: "Use this message?",
@@ -175,6 +183,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
       if (p.isCancel(confirmNew) || !confirmNew) {
         p.cancel("Aborted");
+        cleanup();
         process.exit(0);
       }
     }
@@ -188,9 +197,12 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     const result = await commit(commitMessage!);
     s.stop(`Committed successfully!\n${color.dim(result)}`);
     p.outro(color.green("Done!"));
+    cleanup();
+    process.exit(0);
   } catch (error: any) {
     s.stop("Commit failed");
     p.cancel(error.message);
+    cleanup();
     process.exit(1);
   }
 }
