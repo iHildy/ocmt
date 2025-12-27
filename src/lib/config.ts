@@ -1,7 +1,7 @@
 /**
  * Configuration file management for oc
  *
- * Manages .oc/config.md and .oc/changelog.md in the repo root
+ * Manages .oc/config.md, .oc/changelog.md, and .oc/config.json in the repo root
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -11,6 +11,54 @@ import { git } from "../utils/git";
 const CONFIG_DIR = ".oc";
 const COMMIT_CONFIG_FILE = "config.md";
 const CHANGELOG_CONFIG_FILE = "changelog.md";
+const JSON_CONFIG_FILE = "config.json";
+
+/**
+ * JSON config structure
+ */
+export interface OcConfig {
+  commit?: {
+    autoAccept?: boolean;
+    autoStageAll?: boolean;
+    model?: string; // format: "provider/model"
+  };
+  changelog?: {
+    autoSave?: boolean;
+    outputFile?: string;
+    model?: string; // format: "provider/model"
+  };
+  release?: {
+    autoTag?: boolean;
+    autoPush?: boolean;
+    tagPrefix?: string;
+  };
+  general?: {
+    confirmPrompts?: boolean;
+    verbose?: boolean;
+  };
+}
+
+const DEFAULT_JSON_CONFIG: OcConfig = {
+  commit: {
+    autoAccept: false,
+    autoStageAll: false,
+    model: "opencode/gpt-5-nano",
+  },
+  changelog: {
+    autoSave: false,
+    outputFile: "CHANGELOG.md",
+    model: "opencode/claude-sonnet-4-5",
+  },
+  release: {
+    autoTag: false,
+    autoPush: false,
+    tagPrefix: "v",
+  },
+  general: {
+    confirmPrompts: true,
+    verbose: false,
+  },
+};
 
 const DEFAULT_COMMIT_CONFIG = `# Commit Message Guidelines
 
@@ -148,5 +196,26 @@ export async function configExists(): Promise<boolean> {
     return existsSync(join(configDir, COMMIT_CONFIG_FILE));
   } catch {
     return false;
+  }
+}
+
+/**
+ * Get the JSON config (creates default if doesn't exist)
+ */
+export async function getConfig(): Promise<OcConfig> {
+  const configDir = await ensureConfigDir();
+  const configPath = join(configDir, JSON_CONFIG_FILE);
+
+  if (!existsSync(configPath)) {
+    writeFileSync(configPath, JSON.stringify(DEFAULT_JSON_CONFIG, null, 2), "utf-8");
+    return DEFAULT_JSON_CONFIG;
+  }
+
+  try {
+    const content = readFileSync(configPath, "utf-8");
+    return JSON.parse(content) as OcConfig;
+  } catch {
+    // If parsing fails, return defaults
+    return DEFAULT_JSON_CONFIG;
   }
 }

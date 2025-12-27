@@ -13,20 +13,52 @@ import {
 } from "@opencode-ai/sdk";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { getCommitConfig, getChangelogConfig } from "./config";
+import { getCommitConfig, getChangelogConfig, getConfig } from "./config";
 
 const execAsync = promisify(exec);
 
-// Models
-const COMMIT_MODEL = {
-  providerID: "opencode",
-  modelID: "gpt-5-nano",
-};
+// Default models (used as fallback)
+const DEFAULT_COMMIT_MODEL = "opencode/gpt-5-nano";
+const DEFAULT_CHANGELOG_MODEL = "opencode/claude-sonnet-4-5";
 
-const CHANGELOG_MODEL = {
-  providerID: "opencode",
-  modelID: "claude-sonnet-4-5",
-};
+interface ModelConfig {
+  providerID: string;
+  modelID: string;
+}
+
+/**
+ * Parse a model string in "provider/model" format
+ * Falls back to "opencode" provider if no slash is present
+ */
+function parseModelString(modelStr: string): ModelConfig {
+  const slashIndex = modelStr.indexOf("/");
+  if (slashIndex !== -1) {
+    return {
+      providerID: modelStr.substring(0, slashIndex),
+      modelID: modelStr.substring(slashIndex + 1),
+    };
+  }
+  // Default to "opencode" provider if no slash
+  return { providerID: "opencode", modelID: modelStr };
+}
+
+/**
+ * Get the model config for commit generation from user config
+ */
+async function getCommitModel(): Promise<ModelConfig> {
+  const config = await getConfig();
+  const modelStr = config.commit?.model || DEFAULT_COMMIT_MODEL;
+  return parseModelString(modelStr);
+}
+
+/**
+ * Get the model config for changelog generation from user config
+ */
+async function getChangelogModel(): Promise<ModelConfig> {
+  const config = await getConfig();
+  const modelStr = config.changelog?.model || DEFAULT_CHANGELOG_MODEL;
+  return parseModelString(modelStr);
+}
 
 // Server state
 let clientInstance: OpencodeClient | null = null;
@@ -165,6 +197,7 @@ export async function generateCommitMessage(
 
   const client = await getClient();
   const systemPrompt = await getCommitConfig();
+  const commitModel = await getCommitModel();
 
   // Create a session for this commit
   const session = await client.session.create({
@@ -186,7 +219,7 @@ export async function generateCommitMessage(
   const result = await client.session.prompt({
     path: { id: session.data.id },
     body: {
-      model: COMMIT_MODEL,
+      model: commitModel,
       parts: [{ type: "text", text: prompt }],
     },
   });
@@ -222,6 +255,7 @@ export async function generateChangelog(
 
   const client = await getClient();
   const systemPrompt = await getChangelogConfig();
+  const changelogModel = await getChangelogModel();
 
   // Create a session for this changelog
   const session = await client.session.create({
@@ -252,7 +286,7 @@ export async function generateChangelog(
   const result = await client.session.prompt({
     path: { id: session.data.id },
     body: {
-      model: CHANGELOG_MODEL,
+      model: changelogModel,
       parts: [{ type: "text", text: prompt }],
     },
   });
@@ -284,6 +318,7 @@ export async function updateChangelogFile(
   const { newChangelog, existingChangelog, changelogPath } = options;
 
   const client = await getClient();
+  const changelogModel = await getChangelogModel();
 
   // Create a session for this update
   const session = await client.session.create({
@@ -321,7 +356,7 @@ Return the complete updated CHANGELOG.md content:`;
   const result = await client.session.prompt({
     path: { id: session.data.id },
     body: {
-      model: CHANGELOG_MODEL,
+      model: changelogModel,
       parts: [{ type: "text", text: prompt }],
     },
   });
