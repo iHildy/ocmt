@@ -213,9 +213,17 @@ export async function getConfig(): Promise<OcConfig> {
 
   try {
     const content = readFileSync(configPath, "utf-8");
-    return JSON.parse(content) as OcConfig;
-  } catch {
+    const parsed = JSON.parse(content);
+    // Deep merge user config with defaults
+    return {
+      commit: { ...DEFAULT_JSON_CONFIG.commit, ...parsed.commit },
+      changelog: { ...DEFAULT_JSON_CONFIG.changelog, ...parsed.changelog },
+      release: { ...DEFAULT_JSON_CONFIG.release, ...parsed.release },
+      general: { ...DEFAULT_JSON_CONFIG.general, ...parsed.general },
+    };
+  } catch (error) {
     // If parsing fails, return defaults
+    console.warn(`Failed to parse config.json: ${error}. Using defaults.`);
     return DEFAULT_JSON_CONFIG;
   }
 }
