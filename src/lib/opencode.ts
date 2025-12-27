@@ -31,15 +31,31 @@ interface ModelConfig {
  * Falls back to "opencode" provider if no slash is present
  */
 function parseModelString(modelStr: string): ModelConfig {
-  const slashIndex = modelStr.indexOf("/");
-  if (slashIndex !== -1) {
-    return {
-      providerID: modelStr.substring(0, slashIndex),
-      modelID: modelStr.substring(slashIndex + 1),
-    };
+  // Validate input is not empty
+  const trimmedInput = modelStr.trim();
+  if (!trimmedInput) {
+    throw new Error(
+      "Invalid model string: expected 'provider/model' with non-empty parts"
+    );
   }
+
+  const slashIndex = trimmedInput.indexOf("/");
+  if (slashIndex !== -1) {
+    const providerID = trimmedInput.substring(0, slashIndex).trim();
+    const modelID = trimmedInput.substring(slashIndex + 1).trim();
+
+    // Validate both parts are non-empty
+    if (!providerID || !modelID) {
+      throw new Error(
+        "Invalid model string: expected 'provider/model' with non-empty parts"
+      );
+    }
+
+    return { providerID, modelID };
+  }
+
   // Default to "opencode" provider if no slash
-  return { providerID: "opencode", modelID: modelStr };
+  return { providerID: "opencode", modelID: trimmedInput };
 }
 
 /**
