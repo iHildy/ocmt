@@ -170,7 +170,7 @@ You can use any model supported by your provider. For example:
 - `opencode/claude-sonnet-4-5`
 - `github-copilot/gpt-4`
 
-Refrence [models.dev](https://models.dev/) for proper syntax supported by OpenCode
+Reference [models.dev](https://models.dev/) for proper syntax supported by OpenCode
 
 ### `config.md` - Commit Message Rules
 
