@@ -15,6 +15,7 @@ import {
   type GitStatus,
 } from "../utils/git";
 import { generateCommitMessage, generateChangelog, updateChangelogFile, cleanup } from "../lib/opencode";
+import { maybeCreateBranchForCommit } from "../lib/branch";
 import {
   addHistoryEntry,
   getLastEntry,
@@ -182,6 +183,16 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
       const diff = await getStagedDiff();
       
       if (diff) {
+        const branchFlow = await maybeCreateBranchForCommit({
+          diff,
+          yes: options.yes,
+        });
+
+        if (branchFlow === "abort") {
+          cleanup();
+          process.exit(0);
+        }
+
         const genSpinner = p.spinner();
         genSpinner.start("Generating commit message");
         

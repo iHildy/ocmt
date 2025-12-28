@@ -9,6 +9,7 @@ import {
   type GitStatus,
 } from "../utils/git";
 import { generateCommitMessage, cleanup } from "../lib/opencode";
+import { maybeCreateBranchForCommit } from "../lib/branch";
 
 export interface CommitOptions {
   message?: string;
@@ -99,6 +100,16 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
   // Show diff summary
   const diffLines = diff.split("\n").length;
   p.log.info(`Diff: ${diffLines} lines`);
+
+  const branchFlow = await maybeCreateBranchForCommit({
+    diff,
+    yes: options.yes,
+  });
+
+  if (branchFlow === "abort") {
+    cleanup();
+    process.exit(0);
+  }
 
   // If message provided, use it directly
   let commitMessage = options.message;

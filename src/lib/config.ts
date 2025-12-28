@@ -66,6 +66,9 @@ export interface OcConfig {
   commit?: {
     autoAccept?: boolean;
     autoStageAll?: boolean;
+    autoCreateBranchOnDefault?: boolean;
+    autoCreateBranchOnNonDefault?: boolean;
+    forceNewBranchOnDefault?: boolean;
     model?: string; // format: "provider/model"
   };
   changelog?: {
@@ -88,6 +91,9 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
   commit: {
     autoAccept: false,
     autoStageAll: false,
+    autoCreateBranchOnDefault: true,
+    autoCreateBranchOnNonDefault: false,
+    forceNewBranchOnDefault: false,
     model: "opencode/gpt-5-nano",
   },
   changelog: {
