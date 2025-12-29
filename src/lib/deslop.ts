@@ -134,6 +134,8 @@ export async function maybeDeslopStagedChanges(
 
   let deslopSession: Awaited<ReturnType<typeof runDeslopEdits>> | null = null;
   let snapshotRef: string | null = null;
+  const fallbackSummary = "Deslop completed with minor cleanup adjustments.";
+  let summary: string | null = null;
 
   try {
     snapshotRef = await createGitSnapshotRef();
@@ -147,10 +149,7 @@ export async function maybeDeslopStagedChanges(
       notStagedFiles,
     });
 
-    const summary = deslopSession.summary?.trim();
-    const fallbackSummary = "Deslop completed with minor cleanup adjustments.";
-    deslopSession.close();
-    deslopSession = null;
+    summary = deslopSession.summary?.trim() || null;
 
     await stageFiles(stagedFiles);
 
@@ -160,7 +159,6 @@ export async function maybeDeslopStagedChanges(
     if (!didChange) {
       s.stop("No deslop changes needed");
       p.log.step(summary || "No deslop changes were required.");
-      deslopSession.close();
       return "continue";
     }
 
@@ -168,7 +166,6 @@ export async function maybeDeslopStagedChanges(
 
     if (options.yes) {
       p.log.step(summary || fallbackSummary);
-      deslopSession.close();
       return "updated";
     }
 
@@ -214,8 +211,15 @@ export async function maybeDeslopStagedChanges(
         // Ignore cleanup errors
       }
     }
-    deslopSession?.close();
     p.cancel(error.message);
     return "abort";
+  } finally {
+    if (deslopSession) {
+      try {
+        await deslopSession.close();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   }
 }
