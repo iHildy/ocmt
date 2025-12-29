@@ -1,19 +1,19 @@
-
-
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import * as p from "@clack/prompts";
+import {
+	createOpencode,
+	createOpencodeClient,
+	type OpencodeClient,
+	type Part,
+	type TextPart,
+} from "@opencode-ai/sdk";
 import color from "picocolors";
 import {
-  createOpencode,
-  createOpencodeClient,
-  type OpencodeClient,
-} from "@opencode-ai/sdk";
-import { exec } from "child_process";
-import { promisify } from "util";
-import {
-  getCommitConfig,
-  getChangelogConfig,
-  getPRConfig,
-  getConfig,
+	getChangelogConfig,
+	getCommitConfig,
+	getConfig,
+	getPRConfig,
 } from "./config";
 
 const execAsync = promisify(exec);
@@ -23,70 +23,70 @@ const DEFAULT_COMMIT_MODEL = "opencode/gpt-5-nano";
 const DEFAULT_CHANGELOG_MODEL = "opencode/claude-sonnet-4-5";
 
 interface ModelConfig {
-  providerID: string;
-  modelID: string;
+	providerID: string;
+	modelID: string;
 }
 
 function parseModelString(modelStr: string): ModelConfig {
-  const trimmedInput = modelStr.trim();
-  if (!trimmedInput) {
-    throw new Error(
-      "Invalid model string: expected 'provider/model' with non-empty parts",
-    );
-  }
+	const trimmedInput = modelStr.trim();
+	if (!trimmedInput) {
+		throw new Error(
+			"Invalid model string: expected 'provider/model' with non-empty parts",
+		);
+	}
 
-  const slashIndex = trimmedInput.indexOf("/");
-  if (slashIndex !== -1) {
-    const providerID = trimmedInput.substring(0, slashIndex).trim();
-    const modelID = trimmedInput.substring(slashIndex + 1).trim();
+	const slashIndex = trimmedInput.indexOf("/");
+	if (slashIndex !== -1) {
+		const providerID = trimmedInput.substring(0, slashIndex).trim();
+		const modelID = trimmedInput.substring(slashIndex + 1).trim();
 
-    if (!providerID || !modelID) {
-      throw new Error(
-        "Invalid model string: expected 'provider/model' with non-empty parts",
-      );
-    }
+		if (!providerID || !modelID) {
+			throw new Error(
+				"Invalid model string: expected 'provider/model' with non-empty parts",
+			);
+		}
 
-    return { providerID, modelID };
-  }
+		return { providerID, modelID };
+	}
 
-  return { providerID: "opencode", modelID: trimmedInput };
+	return { providerID: "opencode", modelID: trimmedInput };
 }
 
 function formatModelID(model: ModelConfig): string {
-  return `${model.providerID}/${model.modelID}`;
+	return `${model.providerID}/${model.modelID}`;
 }
 
 async function getCommitModel(): Promise<ModelConfig> {
-  const config = await getConfig();
-  const modelStr = config.commit?.model || DEFAULT_COMMIT_MODEL;
-  return parseModelString(modelStr);
+	const config = await getConfig();
+	const modelStr = config.commit?.model || DEFAULT_COMMIT_MODEL;
+	return parseModelString(modelStr);
 }
 
 async function getBranchModel(): Promise<ModelConfig> {
-  const config = await getConfig();
-  const modelStr =
-    config.commit?.branchModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
-  return parseModelString(modelStr);
+	const config = await getConfig();
+	const modelStr =
+		config.commit?.branchModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
+	return parseModelString(modelStr);
 }
 
 async function getDeslopModel(): Promise<ModelConfig> {
-  const config = await getConfig();
-  const modelStr =
-    config.commit?.deslopModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
-  return parseModelString(modelStr);
+	const config = await getConfig();
+	const modelStr =
+		config.commit?.deslopModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
+	return parseModelString(modelStr);
 }
 
 async function getChangelogModel(): Promise<ModelConfig> {
-  const config = await getConfig();
-  const modelStr = config.changelog?.model || DEFAULT_CHANGELOG_MODEL;
-  return parseModelString(modelStr);
+	const config = await getConfig();
+	const modelStr = config.changelog?.model || DEFAULT_CHANGELOG_MODEL;
+	return parseModelString(modelStr);
 }
 
 async function getPRModel(): Promise<ModelConfig> {
-  const config = await getConfig();
-  const modelStr =
-    config.pr?.model || config.commit?.model || DEFAULT_COMMIT_MODEL;
-  return parseModelString(modelStr);
+	const config = await getConfig();
+	const modelStr =
+		config.pr?.model || config.commit?.model || DEFAULT_COMMIT_MODEL;
+	return parseModelString(modelStr);
 }
 
 // Server state
@@ -95,274 +95,276 @@ let serverInstance: { close: () => void } | null = null;
 const DEFAULT_OPENCODE_URL = "http://localhost:4096";
 
 export interface CommitGenerationOptions {
-  diff: string;
-  context?: string;
+	diff: string;
+	context?: string;
+	modelOverride?: string;
 }
 
 export interface BranchGenerationOptions {
-  diff: string;
-  context?: string;
+	diff: string;
+	context?: string;
 }
 
 export interface DeslopGenerationOptions {
-  stagedDiff: string;
-  baseDiff?: string;
-  baseRef?: string;
-  extraPrompt?: string;
-  stagedFiles?: string[];
-  notStagedFiles?: string[];
+	stagedDiff: string;
+	baseDiff?: string;
+	baseRef?: string;
+	extraPrompt?: string;
+	stagedFiles?: string[];
+	notStagedFiles?: string[];
 }
 
 export interface DeslopEditResult {
-  summary: string | null;
-  sessionID: string;
-  messageID: string;
-  close: () => Promise<void>;
+	summary: string | null;
+	sessionID: string;
+	messageID: string;
+	close: () => Promise<void>;
 }
 
 export interface ChangelogGenerationOptions {
-  commits: Array<{ hash: string; message: string }>;
-  diff?: string;
-  fromRef: string;
-  toRef: string;
-  version?: string | null;
+	commits: Array<{ hash: string; message: string }>;
+	diff?: string;
+	fromRef: string;
+	toRef: string;
+	version?: string | null;
+	modelOverride?: string;
 }
 
 export interface PRGenerationOptions {
-  diff: string;
-  commits: Array<{ hash: string; message: string }>;
-  targetBranch: string;
-  sourceBranch: string;
+	diff: string;
+	commits: Array<{ hash: string; message: string }>;
+	targetBranch: string;
+	sourceBranch: string;
 }
 
 export interface PRContent {
-  title: string;
-  body: string;
+	title: string;
+	body: string;
 }
 
 export interface UpdateChangelogOptions {
-  newChangelog: string;
-  existingChangelog: string;
-  changelogPath: string;
+	newChangelog: string;
+	existingChangelog: string;
 }
 
 async function isOpencodeInstalled(): Promise<boolean> {
-  try {
-    await execAsync("which opencode");
-    return true;
-  } catch {
-    return false;
-  }
+	try {
+		await execAsync("which opencode");
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function checkAuth(client: OpencodeClient): Promise<boolean> {
-  try {
-    const config = await client.config.get();
-    return !!config;
-  } catch {
-    return false;
-  }
+	try {
+		const config = await client.config.get();
+		return !!config;
+	} catch {
+		return false;
+	}
 }
 
 async function getClient(): Promise<OpencodeClient> {
-  if (clientInstance) {
-    return clientInstance;
-  }
+	if (clientInstance) {
+		return clientInstance;
+	}
 
-  const envBaseUrl =
-    process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
-  if (envBaseUrl?.trim()) {
-    try {
-      const client = createOpencodeClient({
-        baseUrl: envBaseUrl.trim(),
-      });
-      await client.config.get();
-      clientInstance = client;
-      return client;
-    } catch {
-      p.log.warn(
-        `Failed to connect to OpenCode server at ${envBaseUrl}. Falling back to local server.`,
-      );
-    }
-  }
+	const envBaseUrl =
+		process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
+	if (envBaseUrl?.trim()) {
+		try {
+			const client = createOpencodeClient({
+				baseUrl: envBaseUrl.trim(),
+			});
+			await client.config.get();
+			clientInstance = client;
+			return client;
+		} catch {
+			p.log.warn(
+				`Failed to connect to OpenCode server at ${envBaseUrl}. Falling back to local server.`,
+			);
+		}
+	}
 
-  // Try connecting to existing server first
-  try {
-    const client = createOpencodeClient({
-      baseUrl: DEFAULT_OPENCODE_URL,
-    });
-    // Test connection
-    await client.config.get();
-    clientInstance = client;
-    return client;
-  } catch {
-    // No existing server, need to spawn one
-  }
+	// Try connecting to existing server first
+	try {
+		const client = createOpencodeClient({
+			baseUrl: DEFAULT_OPENCODE_URL,
+		});
+		// Test connection
+		await client.config.get();
+		clientInstance = client;
+		return client;
+	} catch {
+		// No existing server, need to spawn one
+	}
 
-  // Check if opencode is installed
-  if (!(await isOpencodeInstalled())) {
-    p.log.error("OpenCode CLI is not installed");
-    p.log.info(
-      `Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`,
-    );
-    process.exit(1);
-  }
+	// Check if opencode is installed
+	if (!(await isOpencodeInstalled())) {
+		p.log.error("OpenCode CLI is not installed");
+		p.log.info(
+			`Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`,
+		);
+		process.exit(1);
+	}
 
-  // Spawn new server
-  try {
-    const opencode = await createOpencode({
-      timeout: 10000,
-    });
+	// Spawn new server
+	try {
+		const opencode = await createOpencode({
+			timeout: 10000,
+		});
 
-    clientInstance = opencode.client;
-    serverInstance = opencode.server;
+		clientInstance = opencode.client;
+		serverInstance = opencode.server;
 
-    // Check authentication
-    if (!(await checkAuth(opencode.client))) {
-      p.log.warn("Not authenticated with OpenCode");
-      p.log.info(`Run ${color.cyan("opencode auth")} to authenticate`);
-      process.exit(1);
-    }
+		// Check authentication
+		if (!(await checkAuth(opencode.client))) {
+			p.log.warn("Not authenticated with OpenCode");
+			p.log.info(`Run ${color.cyan("opencode auth")} to authenticate`);
+			process.exit(1);
+		}
 
-    // Clean up server on process exit
-    process.on("exit", () => {
-      serverInstance?.close();
-    });
-    process.on("SIGINT", () => {
-      serverInstance?.close();
-      process.exit(0);
-    });
-    process.on("SIGTERM", () => {
-      serverInstance?.close();
-      process.exit(0);
-    });
+		// Clean up server on process exit
+		process.on("exit", () => {
+			serverInstance?.close();
+		});
+		process.on("SIGINT", () => {
+			serverInstance?.close();
+			process.exit(0);
+		});
+		process.on("SIGTERM", () => {
+			serverInstance?.close();
+			process.exit(0);
+		});
 
-    return opencode.client;
-  } catch (error) {
-    p.log.error(`Failed to start OpenCode server: ${error instanceof Error ? error.message : String(error)}`);
-    p.log.info(`Make sure OpenCode is installed and configured correctly`);
-    process.exit(1);
-  }
+		return opencode.client;
+	} catch (error) {
+		p.log.error(
+			`Failed to start OpenCode server: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		p.log.info(`Make sure OpenCode is installed and configured correctly`);
+		process.exit(1);
+	}
 }
 
+function extractTextFromParts(parts: Part[]): string {
+	const textParts = parts
+		.filter((part): part is TextPart => part.type === "text")
+		.map((part) => part.text)
+		.join("");
 
-
-function extractTextFromParts(parts: any[]): string {
-  const textParts = parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-
-  return textParts.trim();
+	return textParts.trim();
 }
 
 function extractDeslopSummary(text: string): string | null {
-  const summaryMatch = text.match(/SUMMARY:\s*([\s\S]*)$/i);
-  return summaryMatch ? summaryMatch[1].trim() : null;
+	const summaryMatch = text.match(/SUMMARY:\s*([\s\S]*)$/i);
+	return summaryMatch ? summaryMatch[1].trim() : null;
 }
 
 interface OpencodePromptOptions {
-  title: string;
-  prompt: string;
-  model: ModelConfig;
-  agent?: string;
-  tools?: Record<string, boolean>;
-  directory?: string;
+	title: string;
+	prompt: string;
+	model: ModelConfig;
+	agent?: string;
+	tools?: Record<string, boolean>;
+	directory?: string;
 }
 
 interface OpencodePromptResult {
-  message: string;
-  sessionID: string;
-  messageID: string;
-  close: () => Promise<void>;
+	message: string;
+	sessionID: string;
+	messageID: string;
+	close: () => Promise<void>;
 }
 
 async function runOpencodePrompt(
-  options: OpencodePromptOptions,
+	options: OpencodePromptOptions,
 ): Promise<OpencodePromptResult> {
-  const { title, prompt, model, agent, tools, directory } = options;
-  const client = await getClient();
-  const modelID = formatModelID(model);
+	const { title, prompt, model, agent, tools, directory } = options;
+	const client = await getClient();
+	const modelID = formatModelID(model);
 
-  const session = await client.session.create({
-    body: { title },
-  });
+	const session = await client.session.create({
+		body: { title },
+	});
 
-  if (!session.data) {
-    throw new Error("Failed to create session");
-  }
+	if (!session.data) {
+		throw new Error("Failed to create session");
+	}
 
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    try {
-      await client.session.delete({ path: { id: session.data.id } });
-    } catch {
-      // Ignore cleanup errors
-    }
-  };
+	let closed = false;
+	const close = async (): Promise<void> => {
+		if (closed) {
+			return;
+		}
+		closed = true;
+		try {
+			await client.session.delete({ path: { id: session.data.id } });
+		} catch {
+			// Ignore cleanup errors
+		}
+	};
 
-  let result;
-  try {
-    result = await client.session.prompt({
-      path: { id: session.data.id },
-      ...(directory ? { query: { directory } } : {}),
-      body: {
-        model,
-        parts: [{ type: "text", text: prompt }],
-        ...(agent ? { agent } : {}),
-        ...(tools ? { tools } : {}),
-      },
-    });
-  } catch (err) {
-    await close();
-    throw new Error(`Model request failed (${modelID}): ${err instanceof Error ? err.message : String(err)}`);
-  }
+	try {
+		const result = await client.session.prompt({
+			path: { id: session.data.id },
+			...(directory ? { query: { directory } } : {}),
+			body: {
+				model,
+				parts: [{ type: "text", text: prompt }],
+				...(agent ? { agent } : {}),
+				...(tools ? { tools } : {}),
+			},
+		});
 
-  if (!result.data) {
-    await close();
-    throw new Error(`Failed to get AI response from ${modelID}`);
-  }
+		if (!result.data) {
+			await close();
+			throw new Error(`Failed to get AI response from ${modelID}`);
+		}
 
-  const message = extractTextFromParts(result.data.parts || []);
+		const message = extractTextFromParts(result.data.parts || []);
 
-  if (!message) {
-    await close();
-    throw new Error(
-      `No response generated by ${modelID}. Response: ${JSON.stringify(result.data)}`,
-    );
-  }
+		if (!message) {
+			await close();
+			throw new Error(
+				`No response generated by ${modelID}. Response: ${JSON.stringify(result.data)}`,
+			);
+		}
 
-  return {
-    message,
-    sessionID: session.data.id,
-    messageID: result.data.info.id,
-    close,
-  };
+		return {
+			message,
+			sessionID: session.data.id,
+			messageID: result.data.info.id,
+			close,
+		};
+	} catch (err) {
+		await close();
+		throw new Error(
+			`Model request failed (${modelID}): ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 }
 
 function buildDeslopPrompt(options: DeslopGenerationOptions): string {
-  const {
-    stagedDiff,
-    baseDiff,
-    baseRef = "main",
-    extraPrompt,
-    stagedFiles,
-    notStagedFiles,
-  } = options;
-  const filesList =
-    stagedFiles && stagedFiles.length > 0
-      ? stagedFiles.map((file) => `- ${file}`).join("\n")
-      : "";
-  const notStagedList =
-    notStagedFiles && notStagedFiles.length > 0
-      ? notStagedFiles.map((file) => `- ${file}`).join("\n")
-      : "";
+	const {
+		stagedDiff,
+		baseDiff,
+		baseRef = "main",
+		extraPrompt,
+		stagedFiles,
+		notStagedFiles,
+	} = options;
+	const filesList =
+		stagedFiles && stagedFiles.length > 0
+			? stagedFiles.map((file) => `- ${file}`).join("\n")
+			: "";
+	const notStagedList =
+		notStagedFiles && notStagedFiles.length > 0
+			? notStagedFiles.map((file) => `- ${file}`).join("\n")
+			: "";
 
-  let prompt = `# Remove AI code slop
+	let prompt = `# Remove AI code slop
 
 Edit files directly using the available tools.
 
@@ -390,186 +392,190 @@ If no changes are needed, do not edit any files and respond with:
 SUMMARY: No changes required.
 `;
 
-  if (filesList) {
-    prompt += `\nStaged files:\n${filesList}\n`;
-  }
-  if (notStagedList) {
-    prompt += `\nNot staged files:\n${notStagedList}\n`;
-  }
+	if (filesList) {
+		prompt += `\nStaged files:\n${filesList}\n`;
+	}
+	if (notStagedList) {
+		prompt += `\nNot staged files:\n${notStagedList}\n`;
+	}
 
-  prompt += `\nDiff against ${baseRef}:\n\`\`\`diff\n${baseDiff || ""}\n\`\`\`\n\nStaged diff to clean up:\n\`\`\`diff\n${stagedDiff}\n\`\`\``;
+	prompt += `\nDiff against ${baseRef}:\n\`\`\`diff\n${baseDiff || ""}\n\`\`\`\n\nStaged diff to clean up:\n\`\`\`diff\n${stagedDiff}\n\`\`\``;
 
-  if (extraPrompt?.trim()) {
-    prompt += `\n\nAdditional constraints from the user:\n${extraPrompt.trim()}\n`;
-  }
+	if (extraPrompt?.trim()) {
+		prompt += `\n\nAdditional constraints from the user:\n${extraPrompt.trim()}\n`;
+	}
 
-  return prompt;
+	return prompt;
 }
 
 export async function runDeslopEdits(
-  options: DeslopGenerationOptions,
+	options: DeslopGenerationOptions,
 ): Promise<DeslopEditResult> {
-  const deslopModel = await getDeslopModel();
-  const prompt = buildDeslopPrompt(options);
+	const deslopModel = await getDeslopModel();
+	const prompt = buildDeslopPrompt(options);
 
-  const { message, sessionID, messageID, close } = await runOpencodePrompt({
-    title: "oc-deslop",
-    prompt,
-    model: deslopModel,
-    directory: process.cwd(),
-  });
-  const summary = extractDeslopSummary(message);
+	const { message, sessionID, messageID, close } = await runOpencodePrompt({
+		title: "oc-deslop",
+		prompt,
+		model: deslopModel,
+		directory: process.cwd(),
+	});
+	const summary = extractDeslopSummary(message);
 
-  return {
-    summary,
-    sessionID,
-    messageID,
-    close,
-  };
+	return {
+		summary,
+		sessionID,
+		messageID,
+		close,
+	};
 }
 
 async function runCommitPrompt(
-  title: string,
-  prompt: string,
-  modelOverride?: ModelConfig,
+	title: string,
+	prompt: string,
+	modelOverride?: ModelConfig,
 ): Promise<string> {
-  const commitModel = modelOverride ?? (await getCommitModel());
-  const { message, close } = await runOpencodePrompt({
-    title,
-    prompt,
-    model: commitModel,
-  });
+	const commitModel = modelOverride ?? (await getCommitModel());
+	const { message, close } = await runOpencodePrompt({
+		title,
+		prompt,
+		model: commitModel,
+	});
 
-  await close();
-  return message
-    .replace(/^```[\s\S]*?\n/, "")
-    .replace(/\n```$/, "")
-    .trim();
+	await close();
+	return message
+		.replace(/^```[\s\S]*?\n/, "")
+		.replace(/\n```$/, "")
+		.trim();
 }
 
 export async function generateCommitMessage(
-  options: CommitGenerationOptions,
+	options: CommitGenerationOptions,
 ): Promise<string> {
-  const { diff, context } = options;
+	const { diff, context, modelOverride } = options;
 
-  const systemPrompt = await getCommitConfig();
+	const systemPrompt = await getCommitConfig();
 
-  // Build the prompt
-  let prompt = `${systemPrompt}\n\n---\n\nGenerate a commit message for the following diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
+	// Build the prompt
+	let prompt = `${systemPrompt}\n\n---\n\nGenerate a commit message for the following diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
 
-  if (context) {
-    prompt += `\n\nAdditional context: ${context}`;
-  }
+	if (context) {
+		prompt += `\n\nAdditional context: ${context}`;
+	}
 
-  return runCommitPrompt("oc-commit", prompt);
+	// Use model override if provided
+	const model = modelOverride ? parseModelString(modelOverride) : undefined;
+	return runCommitPrompt("oc-commit", prompt, model);
 }
 
 export async function generateBranchName(
-  options: BranchGenerationOptions,
+	options: BranchGenerationOptions,
 ): Promise<string> {
-  const { diff, context } = options;
+	const { diff, context } = options;
 
-  const systemPrompt = await getCommitConfig();
+	const systemPrompt = await getCommitConfig();
 
-  let prompt = `${systemPrompt}\n\n---\n\nGenerate a concise git branch name for the following diff.\n\nRules:\n- Use lowercase letters\n- Use hyphens to separate words\n- Optional prefix like "feat/" or "fix/"\n- No spaces, quotes, or markdown\n- Keep it under 50 characters\n\nDiff:\n\`\`\`diff\n${diff}\n\`\`\``;
+	let prompt = `${systemPrompt}\n\n---\n\nGenerate a concise git branch name for the following diff.\n\nRules:\n- Use lowercase letters\n- Use hyphens to separate words\n- Optional prefix like "feat/" or "fix/"\n- No spaces, quotes, or markdown\n- Keep it under 50 characters\n\nDiff:\n\`\`\`diff\n${diff}\n\`\`\``;
 
-  if (context) {
-    prompt += `\n\nAdditional context: ${context}`;
-  }
+	if (context) {
+		prompt += `\n\nAdditional context: ${context}`;
+	}
 
-  const branchModel = await getBranchModel();
-  return runCommitPrompt("oc-branch", prompt, branchModel);
+	const branchModel = await getBranchModel();
+	return runCommitPrompt("oc-branch", prompt, branchModel);
 }
 
 function parsePRContent(response: string): PRContent {
-  const titleMatch = response.match(/TITLE:\s*(.+?)(?:\n|$)/i);
-  const bodyMatch = response.match(/BODY:\s*([\s\S]+)$/i);
+	const titleMatch = response.match(/TITLE:\s*(.+?)(?:\n|$)/i);
+	const bodyMatch = response.match(/BODY:\s*([\s\S]+)$/i);
 
-  const title = titleMatch?.[1]?.trim() || "Update";
-  let body = bodyMatch?.[1]?.trim() || response.trim();
+	const title = titleMatch?.[1]?.trim() || "Update";
+	let body = bodyMatch?.[1]?.trim() || response.trim();
 
-  // Clean up markdown code blocks if present
-  body = body
-    .replace(/^```markdown\n?/i, "")
-    .replace(/^```\n?/, "")
-    .replace(/\n?```$/, "")
-    .trim();
+	// Clean up markdown code blocks if present
+	body = body
+		.replace(/^```markdown\n?/i, "")
+		.replace(/^```\n?/, "")
+		.replace(/\n?```$/, "")
+		.trim();
 
-  return { title, body };
+	return { title, body };
 }
 
 export async function generatePRContent(
-  options: PRGenerationOptions,
+	options: PRGenerationOptions,
 ): Promise<PRContent> {
-  const { diff, commits, targetBranch, sourceBranch } = options;
+	const { diff, commits, targetBranch, sourceBranch } = options;
 
-  const systemPrompt = await getPRConfig();
-  const prModel = await getPRModel();
+	const systemPrompt = await getPRConfig();
+	const prModel = await getPRModel();
 
-  // Build commits list
-  const commitsList = commits
-    .map((c) => `- ${c.hash}: ${c.message}`)
-    .join("\n");
+	// Build commits list
+	const commitsList = commits
+		.map((c) => `- ${c.hash}: ${c.message}`)
+		.join("\n");
 
-  // Build the prompt
-  let prompt = `${systemPrompt}\n\n---\n\nGenerate a pull request title and description for merging "${sourceBranch}" into "${targetBranch}".\n\n`;
+	// Build the prompt
+	let prompt = `${systemPrompt}\n\n---\n\nGenerate a pull request title and description for merging "${sourceBranch}" into "${targetBranch}".\n\n`;
 
-  if (commits.length > 0) {
-    prompt += `## Commits\n\n${commitsList}\n\n`;
-  }
+	if (commits.length > 0) {
+		prompt += `## Commits\n\n${commitsList}\n\n`;
+	}
 
-  prompt += `## Diff\n\n\`\`\`diff\n${diff}\n\`\`\``;
+	prompt += `## Diff\n\n\`\`\`diff\n${diff}\n\`\`\``;
 
-  const { message, close } = await runOpencodePrompt({
-    title: "oc-pr",
-    prompt,
-    model: prModel,
-  });
-  await close();
+	const { message, close } = await runOpencodePrompt({
+		title: "oc-pr",
+		prompt,
+		model: prModel,
+	});
+	await close();
 
-  return parsePRContent(message);
+	return parsePRContent(message);
 }
 
 export async function generateChangelog(
-  options: ChangelogGenerationOptions,
+	options: ChangelogGenerationOptions,
 ): Promise<string> {
-  const { commits, fromRef, toRef, version } = options;
-  const systemPrompt = await getChangelogConfig();
-  const changelogModel = await getChangelogModel();
+	const { commits, fromRef, toRef, version, modelOverride } = options;
+	const systemPrompt = await getChangelogConfig();
+	const changelogModel = modelOverride
+		? parseModelString(modelOverride)
+		: await getChangelogModel();
 
-  // Build the commits list
-  const commitsList = commits
-    .map((c) => `- ${c.hash}: ${c.message}`)
-    .join("\n");
+	// Build the commits list
+	const commitsList = commits
+		.map((c) => `- ${c.hash}: ${c.message}`)
+		.join("\n");
 
-  // Build version instruction
-  let versionInstruction = "";
-  if (version) {
-    versionInstruction = `\n\nIMPORTANT: A version bump to ${version} was detected. Use "[${version}]" as the version header with today's date (format: YYYY-MM-DD), NOT "[Unreleased]".`;
-  } else {
-    versionInstruction = `\n\nUse "[Unreleased]" as the version header since no version bump was detected.`;
-  }
+	// Build version instruction
+	let versionInstruction = "";
+	if (version) {
+		versionInstruction = `\n\nIMPORTANT: A version bump to ${version} was detected. Use "[${version}]" as the version header with today's date (format: YYYY-MM-DD), NOT "[Unreleased]".`;
+	} else {
+		versionInstruction = `\n\nUse "[Unreleased]" as the version header since no version bump was detected.`;
+	}
 
-  // Build the prompt
-  const prompt = `${systemPrompt}\n\n---\n\nGenerate a changelog for the following commits (from ${fromRef} to ${toRef}):${versionInstruction}\n\n${commitsList}`;
+	// Build the prompt
+	const prompt = `${systemPrompt}\n\n---\n\nGenerate a changelog for the following commits (from ${fromRef} to ${toRef}):${versionInstruction}\n\n${commitsList}`;
 
-  const { message, close } = await runOpencodePrompt({
-    title: "oc-changelog",
-    prompt,
-    model: changelogModel,
-  });
-  await close();
+	const { message, close } = await runOpencodePrompt({
+		title: "oc-changelog",
+		prompt,
+		model: changelogModel,
+	});
+	await close();
 
-  return message.trim();
+	return message.trim();
 }
 
 export async function updateChangelogFile(
-  options: UpdateChangelogOptions,
+	options: UpdateChangelogOptions,
 ): Promise<string> {
-  const { newChangelog, existingChangelog, changelogPath } = options;
-  const changelogModel = await getChangelogModel();
+	const { newChangelog, existingChangelog } = options;
+	const changelogModel = await getChangelogModel();
 
-  const prompt = `You are updating a CHANGELOG.md file. Your task is to intelligently merge new changelog entries into the existing file.
+	const prompt = `You are updating a CHANGELOG.md file. Your task is to intelligently merge new changelog entries into the existing file.
 
 ## Rules:
 1. Preserve the existing file structure and header
@@ -592,27 +598,27 @@ ${newChangelog}
 
 Return the complete updated CHANGELOG.md content:`;
 
-  const { message, close } = await runOpencodePrompt({
-    title: "oc-changelog-update",
-    prompt,
-    model: changelogModel,
-  });
-  await close();
+	const { message, close } = await runOpencodePrompt({
+		title: "oc-changelog-update",
+		prompt,
+		model: changelogModel,
+	});
+	await close();
 
-  let updatedChangelog = message;
+	let updatedChangelog = message;
 
-  // Clean up markdown code blocks if present
-  updatedChangelog = updatedChangelog
-    .replace(/^```markdown\n?/i, "")
-    .replace(/^```\n?/, "")
-    .replace(/\n?```$/, "")
-    .trim();
+	// Clean up markdown code blocks if present
+	updatedChangelog = updatedChangelog
+		.replace(/^```markdown\n?/i, "")
+		.replace(/^```\n?/, "")
+		.replace(/\n?```$/, "")
+		.trim();
 
-  return updatedChangelog;
+	return updatedChangelog;
 }
 
 export function cleanup(): void {
-  serverInstance?.close();
-  serverInstance = null;
-  clientInstance = null;
+	serverInstance?.close();
+	serverInstance = null;
+	clientInstance = null;
 }
