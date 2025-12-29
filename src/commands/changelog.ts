@@ -81,7 +81,6 @@ async function saveChangelog(
 			const updatedContent = await updateChangelogFile({
 				newChangelog: cleanContent,
 				existingChangelog: existing,
-				changelogPath,
 			});
 			writeFileSync(changelogPath, `${updatedContent}\n`, "utf-8");
 		} else {
@@ -150,6 +149,62 @@ async function copyToClipboard(text: string): Promise<void> {
 		throw new Error(
 			`Failed to copy to clipboard: ${error instanceof Error ? error.message : String(error)}`,
 		);
+	}
+}
+
+interface HandleSaveActionParams {
+	changelog: string;
+	changelogFileExists: boolean;
+	options: ChangelogOptions;
+	fromRef: string;
+	toRef: string;
+	commitCount: number;
+}
+
+async function handleSaveAction(
+	params: HandleSaveActionParams,
+): Promise<boolean> {
+	const {
+		changelog,
+		changelogFileExists,
+		options,
+		fromRef,
+		toRef,
+		commitCount,
+	} = params;
+	const saveSpinner = p.spinner();
+	const outputPath = options.output || (await getChangelogPath());
+	const actionWord = changelogFileExists ? "Updating" : "Creating";
+	saveSpinner.start(`${actionWord} ${outputPath}`);
+
+	try {
+		const filePath = await saveChangelog(
+			changelog,
+			changelogFileExists,
+			options.output,
+		);
+		const doneWord = changelogFileExists ? "Updated" : "Created";
+		saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
+
+		await addHistoryEntry(fromRef, toRef, commitCount);
+		return true;
+	} catch (error) {
+		saveSpinner.stop("Failed to save");
+		p.log.error(error instanceof Error ? error.message : String(error));
+		return false;
+	}
+}
+
+async function handleCopyAction(changelog: string): Promise<boolean> {
+	try {
+		await copyToClipboard(changelog);
+		p.log.success("Copied to clipboard!");
+		return true;
+	} catch (error) {
+		p.log.error(
+			`Failed to copy: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return false;
 	}
 }
 
@@ -308,36 +363,18 @@ export async function changelogCommand(
 			// Handle --save and --copy flags (non-interactive)
 			if (options.save || options.copy) {
 				if (options.save) {
-					const saveSpinner = p.spinner();
-					const outputPath = options.output || (await getChangelogPath());
-					const actionWord = changelogFileExists ? "Updating" : "Creating";
-					saveSpinner.start(`${actionWord} ${outputPath}`);
-
-					try {
-						const filePath = await saveChangelog(
-							changelog,
-							changelogFileExists,
-							options.output,
-						);
-						const doneWord = changelogFileExists ? "Updated" : "Created";
-						saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
-
-						await addHistoryEntry(fromRef, toRef, commits.length);
-					} catch (error) {
-						saveSpinner.stop("Failed to save");
-						p.log.error(error instanceof Error ? error.message : String(error));
-					}
+					await handleSaveAction({
+						changelog,
+						changelogFileExists,
+						options,
+						fromRef,
+						toRef,
+						commitCount: commits.length,
+					});
 				}
 
 				if (options.copy) {
-					try {
-						await copyToClipboard(changelog);
-						p.log.success("Copied to clipboard!");
-					} catch (error) {
-						p.log.error(
-							`Failed to copy: ${error instanceof Error ? error.message : String(error)}`,
-						);
-					}
+					await handleCopyAction(changelog);
 				}
 
 				p.outro(color.green("Done!"));
@@ -366,33 +403,16 @@ export async function changelogCommand(
 			}
 
 			if (action === "copy") {
-				try {
-					await copyToClipboard(changelog);
-					p.log.success("Copied to clipboard!");
-				} catch (error) {
-					p.log.error(
-						`Failed to copy: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
+				await handleCopyAction(changelog);
 			} else if (action === "save") {
-				const saveSpinner = p.spinner();
-				const actionWord = changelogFileExists ? "Updating" : "Creating";
-				saveSpinner.start(`${actionWord} CHANGELOG.md`);
-
-				try {
-					const filePath = await saveChangelog(
-						changelog,
-						changelogFileExists,
-						options.output,
-					);
-					const doneWord = changelogFileExists ? "Updated" : "Created";
-					saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
-
-					await addHistoryEntry(fromRef, toRef, commits.length);
-				} catch (error) {
-					saveSpinner.stop("Failed to save");
-					p.log.error(error instanceof Error ? error.message : String(error));
-				}
+				await handleSaveAction({
+					changelog,
+					changelogFileExists,
+					options,
+					fromRef,
+					toRef,
+					commitCount: commits.length,
+				});
 			}
 
 			p.outro(color.green("Done!"));

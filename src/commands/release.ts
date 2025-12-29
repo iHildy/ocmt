@@ -70,7 +70,6 @@ async function saveChangelog(
 			const updatedContent = await updateChangelogFile({
 				newChangelog: cleanContent,
 				existingChangelog: existing,
-				changelogPath,
 			});
 			writeFileSync(changelogPath, `${updatedContent}\n`, "utf-8");
 		} else {

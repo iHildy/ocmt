@@ -145,7 +145,6 @@ export interface PRContent {
 export interface UpdateChangelogOptions {
 	newChangelog: string;
 	existingChangelog: string;
-	changelogPath: string;
 }
 
 async function isOpencodeInstalled(): Promise<boolean> {
