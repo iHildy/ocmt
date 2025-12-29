@@ -145,7 +145,8 @@ export async function maybeDeslopStagedChanges(
 	);
 
 	const s = p.spinner();
-	s.start("Deslopping staged changes");
+	const spinnerMessage = "Deslopping staged changes";
+	s.start(spinnerMessage);
 
 	let deslopSession: Awaited<ReturnType<typeof runDeslopEdits>> | null = null;
 	let snapshotRef: string | null = null;
@@ -161,6 +162,8 @@ export async function maybeDeslopStagedChanges(
 			extraPrompt,
 			stagedFiles,
 			notStagedFiles,
+			spinner: s,
+			spinnerMessage,
 		});
 
 		summary = deslopSession.summary?.trim() || null;

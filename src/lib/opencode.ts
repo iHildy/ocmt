@@ -4,8 +4,11 @@ import * as p from "@clack/prompts";
 import {
 	createOpencode,
 	createOpencodeClient,
+	type AssistantMessage,
+	type Event,
 	type OpencodeClient,
 	type Part,
+	type Permission,
 	type TextPart,
 } from "@opencode-ai/sdk";
 import color from "picocolors";
@@ -21,6 +24,12 @@ const execAsync = promisify(exec);
 // Default models (used as fallback)
 const DEFAULT_COMMIT_MODEL = "opencode/gpt-5-nano";
 const DEFAULT_CHANGELOG_MODEL = "opencode/claude-sonnet-4-5";
+
+// Timeout constants
+const PERMISSION_PROMPT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for user to respond to permission
+const OPERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for overall operation
+
+type PermissionResponse = "once" | "always" | "reject";
 
 interface ModelConfig {
 	providerID: string;
@@ -112,6 +121,8 @@ export interface DeslopGenerationOptions {
 	extraPrompt?: string;
 	stagedFiles?: string[];
 	notStagedFiles?: string[];
+	spinner?: ReturnType<typeof p.spinner> | null;
+	spinnerMessage?: string;
 }
 
 export interface DeslopEditResult {
@@ -262,6 +273,320 @@ function extractDeslopSummary(text: string): string | null {
 	return summaryMatch ? summaryMatch[1].trim() : null;
 }
 
+function formatPermissionDescription(permission: Permission): string {
+	const { type, title, pattern, metadata } = permission;
+
+	let description = title || `Permission requested: ${type}`;
+
+	if (type === "bash" || type === "shell") {
+		const command =
+			pattern ||
+			(metadata?.command as string) ||
+			(metadata?.cmd as string) ||
+			null;
+		if (command) {
+			const commandStr = Array.isArray(command) ? command.join(" ") : command;
+			description = `Run bash command:\n${color.cyan(commandStr)}`;
+		}
+	} else if (type === "edit" || type === "file") {
+		const filePath =
+			pattern || (metadata?.path as string) || (metadata?.file as string);
+		if (filePath) {
+			const pathStr = Array.isArray(filePath) ? filePath.join(", ") : filePath;
+			description = `Edit file:\n${color.cyan(pathStr)}`;
+		}
+	} else if (type === "webfetch") {
+		const url = pattern || (metadata?.url as string);
+		if (url) {
+			const urlStr = Array.isArray(url) ? url.join(", ") : url;
+			description = `Fetch URL:\n${color.cyan(urlStr)}`;
+		}
+	} else if (type === "doom_loop") {
+		description = `Doom loop detected (same tool called 3+ times with identical arguments).\nAllow continuation?`;
+	} else if (type === "external_directory") {
+		const path = pattern || (metadata?.path as string);
+		if (path) {
+			const pathStr = Array.isArray(path) ? path.join(", ") : path;
+			description = `Access file outside working directory:\n${color.cyan(pathStr)}`;
+		}
+	}
+
+	return description;
+}
+
+async function promptUserForPermission(
+	permission: Permission,
+): Promise<PermissionResponse> {
+	const description = formatPermissionDescription(permission);
+
+	const result = await p.select({
+		message: description,
+		options: [
+			{ value: "once", label: "Allow once" },
+			{ value: "always", label: "Always allow (this session)" },
+			{ value: "reject", label: "Reject" },
+		],
+	});
+
+	if (p.isCancel(result)) {
+		return "reject";
+	}
+
+	return result as PermissionResponse;
+}
+
+function isEventForSession(event: Event, sessionID: string): boolean {
+	if (!("properties" in event)) {
+		return false;
+	}
+
+	const props = event.properties as Record<string, unknown>;
+
+	if ("sessionID" in props && props.sessionID === sessionID) {
+		return true;
+	}
+
+	if (
+		"info" in props &&
+		typeof props.info === "object" &&
+		props.info !== null
+	) {
+		const info = props.info as Record<string, unknown>;
+		if ("sessionID" in info && info.sessionID === sessionID) {
+			return true;
+		}
+	}
+
+	if (
+		"part" in props &&
+		typeof props.part === "object" &&
+		props.part !== null
+	) {
+		const part = props.part as Record<string, unknown>;
+		if ("sessionID" in part && part.sessionID === sessionID) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function isAssistantMessageComplete(message: AssistantMessage): boolean {
+	return message.time.completed !== undefined;
+}
+
+interface EventStreamResult {
+	assistantMessage: AssistantMessage | null;
+	parts: Part[];
+	error: Error | null;
+}
+
+async function processEventStream(
+	client: OpencodeClient,
+	sessionID: string,
+	spinner: ReturnType<typeof p.spinner> | null,
+	spinnerMessage: string,
+): Promise<EventStreamResult> {
+	const collectedParts = new Map<string, Part>();
+	let assistantMessage: AssistantMessage | null = null;
+	let sessionError: Error | null = null;
+	let eventStream: AsyncIterable<Event> | null = null;
+	let reconnectAttempted = false;
+
+	const startTime = Date.now();
+
+	const connectToEventStream = async (): Promise<AsyncIterable<Event>> => {
+		const response = await client.event.subscribe();
+		if (!response.stream) {
+			throw new Error("Failed to subscribe to event stream");
+		}
+		return response.stream;
+	};
+
+	try {
+		eventStream = await connectToEventStream();
+	} catch (err) {
+		throw new Error(
+			`Failed to connect to event stream: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	try {
+		for await (const event of eventStream) {
+			if (Date.now() - startTime > OPERATION_TIMEOUT_MS) {
+				sessionError = new Error("Operation timed out");
+				break;
+			}
+
+			if (!isEventForSession(event, sessionID)) {
+				continue;
+			}
+
+			switch (event.type) {
+				case "permission.updated": {
+					const permission = event.properties as Permission;
+
+					if (spinner) {
+						spinner.stop("Permission required");
+					}
+
+					let response: PermissionResponse;
+					try {
+						const timeoutPromise = new Promise<PermissionResponse>(
+							(resolve) => {
+								setTimeout(
+									() => resolve("reject"),
+									PERMISSION_PROMPT_TIMEOUT_MS,
+								);
+							},
+						);
+
+						response = await Promise.race([
+							promptUserForPermission(permission),
+							timeoutPromise,
+						]);
+					} catch {
+						response = "reject";
+					}
+
+					try {
+						await client.postSessionIdPermissionsPermissionId({
+							path: { id: sessionID, permissionID: permission.id },
+							body: { response },
+						});
+					} catch (err) {
+						p.log.warn(
+							`Failed to send permission response: ${err instanceof Error ? err.message : String(err)}`,
+						);
+					}
+
+					if (spinner && spinnerMessage) {
+						spinner.start(spinnerMessage);
+					}
+					break;
+				}
+
+				case "message.updated": {
+					const info = event.properties.info;
+					if (info.role === "assistant") {
+						assistantMessage = info as AssistantMessage;
+						if (isAssistantMessageComplete(assistantMessage)) {
+							return {
+								assistantMessage,
+								parts: Array.from(collectedParts.values()),
+								error: null,
+							};
+						}
+					}
+					break;
+				}
+
+				case "message.part.updated": {
+					const part = event.properties.part;
+					collectedParts.set(part.id, part);
+					break;
+				}
+
+				case "session.error": {
+					const errorProps = event.properties;
+					const errorData = errorProps.error;
+					if (errorData) {
+						const errorMessage =
+							"data" in errorData && errorData.data
+								? (errorData.data as { message?: string }).message ||
+									errorData.name
+								: errorData.name;
+						sessionError = new Error(errorMessage || "Session error occurred");
+					} else {
+						sessionError = new Error("Unknown session error");
+					}
+					return {
+						assistantMessage,
+						parts: Array.from(collectedParts.values()),
+						error: sessionError,
+					};
+				}
+
+				case "session.idle": {
+					if (
+						assistantMessage &&
+						isAssistantMessageComplete(assistantMessage)
+					) {
+						return {
+							assistantMessage,
+							parts: Array.from(collectedParts.values()),
+							error: null,
+						};
+					}
+					break;
+				}
+			}
+		}
+	} catch {
+		if (!reconnectAttempted) {
+			reconnectAttempted = true;
+			try {
+				eventStream = await connectToEventStream();
+
+				const sessionStatus = await client.session.get({
+					path: { id: sessionID },
+				});
+
+				if (sessionStatus.data) {
+					const messages = await client.session.messages({
+						path: { id: sessionID },
+					});
+
+					if (messages.data && messages.data.length > 0) {
+						const lastMessage = messages.data[messages.data.length - 1];
+						if (lastMessage.info.role === "assistant") {
+							const assistantInfo = lastMessage.info as AssistantMessage;
+							if (isAssistantMessageComplete(assistantInfo)) {
+								return {
+									assistantMessage: assistantInfo,
+									parts: lastMessage.parts,
+									error: null,
+								};
+							}
+						}
+					}
+				}
+			} catch (reconnectError) {
+				try {
+					await client.session.abort({ path: { id: sessionID } });
+				} catch {
+					// Ignore abort errors
+				}
+				throw new Error(
+					`Event stream disconnected and reconnect failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`,
+				);
+			}
+		}
+	}
+
+	if (sessionError) {
+		return {
+			assistantMessage,
+			parts: Array.from(collectedParts.values()),
+			error: sessionError,
+		};
+	}
+
+	if (assistantMessage) {
+		return {
+			assistantMessage,
+			parts: Array.from(collectedParts.values()),
+			error: null,
+		};
+	}
+
+	return {
+		assistantMessage: null,
+		parts: [],
+		error: new Error("Event stream ended without completing"),
+	};
+}
+
 interface OpencodePromptOptions {
 	title: string;
 	prompt: string;
@@ -280,6 +605,8 @@ interface OpencodePromptResult {
 
 async function runOpencodePrompt(
 	options: OpencodePromptOptions,
+	spinner?: ReturnType<typeof p.spinner> | null,
+	spinnerMessage?: string,
 ): Promise<OpencodePromptResult> {
 	const { title, prompt, model, agent, tools, directory } = options;
 	const client = await getClient();
@@ -293,6 +620,8 @@ async function runOpencodePrompt(
 		throw new Error("Failed to create session");
 	}
 
+	const sessionID = session.data.id;
+
 	let closed = false;
 	const close = async (): Promise<void> => {
 		if (closed) {
@@ -300,15 +629,15 @@ async function runOpencodePrompt(
 		}
 		closed = true;
 		try {
-			await client.session.delete({ path: { id: session.data.id } });
+			await client.session.delete({ path: { id: sessionID } });
 		} catch {
 			// Ignore cleanup errors
 		}
 	};
 
 	try {
-		const result = await client.session.prompt({
-			path: { id: session.data.id },
+		await client.session.promptAsync({
+			path: { id: sessionID },
 			...(directory ? { query: { directory } } : {}),
 			body: {
 				model,
@@ -318,24 +647,36 @@ async function runOpencodePrompt(
 			},
 		});
 
-		if (!result.data) {
+		const result = await processEventStream(
+			client,
+			sessionID,
+			spinner ?? null,
+			spinnerMessage ?? "",
+		);
+
+		if (result.error) {
+			await close();
+			throw result.error;
+		}
+
+		if (!result.assistantMessage) {
 			await close();
 			throw new Error(`Failed to get AI response from ${modelID}`);
 		}
 
-		const message = extractTextFromParts(result.data.parts || []);
+		const message = extractTextFromParts(result.parts);
 
 		if (!message) {
 			await close();
 			throw new Error(
-				`No response generated by ${modelID}. Response: ${JSON.stringify(result.data)}`,
+				`No response generated by ${modelID}. Response: ${JSON.stringify(result.assistantMessage)}`,
 			);
 		}
 
 		return {
 			message,
-			sessionID: session.data.id,
-			messageID: result.data.info.id,
+			sessionID,
+			messageID: result.assistantMessage.id,
 			close,
 		};
 	} catch (err) {
@@ -414,12 +755,16 @@ export async function runDeslopEdits(
 	const deslopModel = await getDeslopModel();
 	const prompt = buildDeslopPrompt(options);
 
-	const { message, sessionID, messageID, close } = await runOpencodePrompt({
-		title: "oc-deslop",
-		prompt,
-		model: deslopModel,
-		directory: process.cwd(),
-	});
+	const { message, sessionID, messageID, close } = await runOpencodePrompt(
+		{
+			title: "oc-deslop",
+			prompt,
+			model: deslopModel,
+			directory: process.cwd(),
+		},
+		options.spinner,
+		options.spinnerMessage,
+	);
 	const summary = extractDeslopSummary(message);
 
 	return {
