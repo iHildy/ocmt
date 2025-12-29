@@ -108,6 +108,129 @@ oc -cl
 # Specify range
 oc changelog --from v1.0.0 --to HEAD
 oc changelog -f v1.0.0 -t v2.0.0
+
+# Auto-save to file (non-interactive)
+oc changelog --from v1.0.0 --save
+
+# Copy to clipboard
+oc changelog --from v1.0.0 --copy
+
+# Both save and copy
+oc changelog --from v1.0.0 --save --copy
+```
+
+### Create Pull Request
+
+```bash
+# Interactive PR creation
+oc pr
+
+# Skip prompts (uses defaults)
+oc pr -y
+
+# Specify target branch
+oc pr --target-branch develop
+oc pr -b main
+
+# Provide title and body directly
+oc pr --title "feat: add new feature" --body "Description here"
+
+# Open in browser for creation
+oc pr --browser
+
+# Auto-open in browser after creation
+oc pr --open
+```
+
+### Create Release
+
+```bash
+# Interactive release (commit, changelog, tag, push)
+oc release
+
+# Specify version
+oc release --version 1.2.0
+
+# Full automated release
+oc release -v 1.2.0 --tag --push -y
+
+# Skip changelog generation
+oc release --skip-changelog --tag
+
+# Custom changelog commit message
+oc release --commit-message "docs: update changelog for v1.2.0"
+```
+
+## Workflows
+
+### Deslop (AI Code Review)
+
+Deslop is an AI-powered feature that cleans up "AI slop" from your staged changes - things like excessive comments, unnecessary defensive code, or style inconsistencies that AI tools sometimes introduce.
+
+#### Standalone Command
+
+```bash
+# Deslop staged changes interactively
+oc deslop
+
+# Deslop with specific instructions
+oc deslop "Remove all JSDoc comments and simplify error handling"
+
+# Skip confirmation prompts (auto-accept changes)
+oc deslop -y
+
+# Non-interactive with instructions
+oc deslop -y "fix formatting and remove debug logs"
+```
+
+#### During Commit Flow
+
+```bash
+# Enable deslop for this commit
+oc --deslop yes
+
+# Disable deslop for this commit
+oc --deslop no
+
+# Provide custom deslop instructions
+oc --deslop "Remove all JSDoc comments and simplify error handling"
+```
+
+**Configuration:** Set `autoDeslop: true` in your `config.json` to enable by default.
+
+### Branch Creation
+
+ocmt can automatically create feature branches with AI-generated names based on your changes.
+
+```bash
+# Specify a branch name directly
+oc --branch feat/my-feature
+
+# Skip branch creation entirely
+oc --skip-branch
+```
+
+**Configuration options:**
+- `autoCreateBranchOnDefault`: Auto-create branch when on default branch (default: `true`)
+- `autoCreateBranchOnNonDefault`: Auto-create branch when on non-default branch (default: `false`)
+- `forceNewBranchOnDefault`: Always require new branch on default branch (default: `false`)
+
+### Non-Interactive Mode
+
+For CI/CD or scripting, use flags to skip all prompts:
+
+```bash
+# Commit with all defaults
+oc -ay --deslop no --skip-branch
+
+# Generate and save changelog
+oc changelog --from v1.0.0 --save -y
+
+# Full release pipeline
+oc release -v 1.2.0 --tag --push -y
+
+# Create PR with specific content
+oc pr -y --title "Release v1.2.0" --body "Release notes here" -b main --open
 ```
 
 ## Configuration
@@ -226,6 +349,9 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 |---------|---------|-------------|
 | `oc` | `ocmt`, `opencommit` | Generate commit message from staged changes |
 | `oc changelog` | `oc cl` | Generate changelog from commits |
+| `oc release` | `oc rel` | Full release flow: commit, changelog, tag, push |
+| `oc pr` | - | Create a pull request for the current branch |
+| `oc deslop` | - | Deslop staged changes (standalone AI code cleanup) |
 
 ## Options
 
@@ -235,6 +361,11 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 |--------|-------------|
 | `-a, --all` | Stage all changes before committing |
 | `-y, --yes` | Skip confirmation prompts |
+| `--deslop <value>` | Deslop control: `yes`, `no`, or custom instructions |
+| `--model <model>` | Override AI model (format: `provider/model`) |
+| `--accept` | Auto-accept generated message without confirmation |
+| `--branch <name>` | Use specified branch name instead of generating |
+| `--skip-branch` | Skip branch creation entirely |
 | `-V, --version` | Show version number |
 | `-h, --help` | Show help |
 
@@ -244,6 +375,40 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 |--------|-------------|
 | `-f, --from <ref>` | Starting commit/tag reference |
 | `-t, --to <ref>` | Ending commit/tag reference (default: `HEAD`) |
+| `-o, --output <path>` | Output file path (default: `CHANGELOG.md`) |
+| `--save` | Auto-save to file without prompting |
+| `--copy` | Copy changelog to clipboard |
+| `--model <model>` | Override AI model (format: `provider/model`) |
+
+### Release Options
+
+| Option | Description |
+|--------|-------------|
+| `-f, --from <ref>` | Starting commit/tag reference |
+| `-v, --version <version>` | Version for the release (semver format) |
+| `-t, --tag` | Create a git tag for the release |
+| `-p, --push` | Push to remote after tagging |
+| `-y, --yes` | Skip confirmation prompts |
+| `--skip-changelog` | Skip changelog generation |
+| `--commit-message <msg>` | Custom commit message for changelog commit |
+
+### PR Options
+
+| Option | Description |
+|--------|-------------|
+| `-y, --yes` | Skip confirmation prompts |
+| `-b, --target-branch <branch>` | Target branch for the PR |
+| `--title <text>` | PR title (skips AI generation for title) |
+| `--body <text>` | PR body/description (skips AI generation for body) |
+| `--browser` | Open in browser for PR creation |
+| `--open` | Auto-open PR in browser after creation |
+
+### Deslop Options
+
+| Option | Description |
+|--------|-------------|
+| `[instruction]` | Optional instructions for deslop (e.g., "remove comments") |
+| `-y, --yes` | Skip confirmation prompts and auto-accept changes |
 
 ## How It Works
 

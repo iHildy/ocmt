@@ -1,49 +1,57 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
 import {
-  isGitRepo,
-  getReleases,
-  getCommitsBetween,
-  getLog,
-  git,
-  detectVersionBump,
-} from "../utils/git";
-import { generateChangelog, updateChangelogFile, cleanup } from "../lib/opencode";
-import {
-  hasCommitsSinceLastChangelog,
-  addHistoryEntry,
-  formatHistoryEntry,
+	addHistoryEntry,
+	formatHistoryEntry,
+	hasCommitsSinceLastChangelog,
 } from "../lib/history";
+import {
+	cleanup,
+	generateChangelog,
+	updateChangelogFile,
+} from "../lib/opencode";
+import {
+	detectVersionBump,
+	getCommitsBetween,
+	getLog,
+	getReleases,
+	git,
+	isGitRepo,
+} from "../utils/git";
 
 export interface ChangelogOptions {
-  from?: string;
-  to?: string;
+	from?: string;
+	to?: string;
+	output?: string;
+	save?: boolean;
+	copy?: boolean;
+	model?: string;
 }
 
 /**
  * Get the git repository root directory
  */
 async function getRepoRoot(): Promise<string> {
-  return git("rev-parse --show-toplevel");
+	return git("rev-parse --show-toplevel");
 }
 
 /**
  * Check if CHANGELOG.md exists in the repo root
  */
 async function changelogExists(): Promise<boolean> {
-  const repoRoot = await getRepoRoot();
-  const changelogPath = join(repoRoot, "CHANGELOG.md");
-  return existsSync(changelogPath);
+	const repoRoot = await getRepoRoot();
+	const changelogPath = join(repoRoot, "CHANGELOG.md");
+	return existsSync(changelogPath);
 }
 
 /**
  * Get the changelog file path
  */
 async function getChangelogPath(): Promise<string> {
-  const repoRoot = await getRepoRoot();
-  return join(repoRoot, "CHANGELOG.md");
+	const repoRoot = await getRepoRoot();
+	return join(repoRoot, "CHANGELOG.md");
 }
 
 /**
@@ -51,44 +59,48 @@ async function getChangelogPath(): Promise<string> {
  * If file exists, use AI to intelligently merge content
  * If file doesn't exist, create new file with header
  */
-async function saveChangelog(content: string, useAI: boolean = true): Promise<string> {
-  const changelogPath = await getChangelogPath();
+async function saveChangelog(
+	content: string,
+	useAI: boolean = true,
+	customPath?: string,
+): Promise<string> {
+	const changelogPath = customPath || (await getChangelogPath());
 
-  // Clean up the content - remove markdown code blocks if present
-  let cleanContent = content
-    .replace(/^```markdown\n?/i, "")
-    .replace(/^```\n?/, "")
-    .replace(/\n?```$/i, "")
-    .trim();
+	// Clean up the content - remove markdown code blocks if present
+	const cleanContent = content
+		.replace(/^```markdown\n?/i, "")
+		.replace(/^```\n?/, "")
+		.replace(/\n?```$/i, "")
+		.trim();
 
-  if (existsSync(changelogPath)) {
-    const existing = readFileSync(changelogPath, "utf-8");
+	if (existsSync(changelogPath)) {
+		const existing = readFileSync(changelogPath, "utf-8");
 
-    if (useAI) {
-      // Use AI to intelligently merge the changelog
-      const updatedContent = await updateChangelogFile({
-        newChangelog: cleanContent,
-        existingChangelog: existing,
-        changelogPath,
-      });
-      writeFileSync(changelogPath, updatedContent + "\n", "utf-8");
-    } else {
-      // Fallback: simple prepend after header
-      const headerMatch = existing.match(/^#\s+Changelog\s*\n/i);
+		if (useAI) {
+			// Use AI to intelligently merge the changelog
+			const updatedContent = await updateChangelogFile({
+				newChangelog: cleanContent,
+				existingChangelog: existing,
+				changelogPath,
+			});
+			writeFileSync(changelogPath, `${updatedContent}\n`, "utf-8");
+		} else {
+			// Fallback: simple prepend after header
+			const headerMatch = existing.match(/^#\s+Changelog\s*\n/i);
 
-      if (headerMatch) {
-        const headerEnd = headerMatch.index! + headerMatch[0].length;
-        const before = existing.slice(0, headerEnd);
-        const after = existing.slice(headerEnd);
-        const newContent = `${before}\n${cleanContent}\n${after}`;
-        writeFileSync(changelogPath, newContent, "utf-8");
-      } else {
-        writeFileSync(changelogPath, `${cleanContent}\n\n${existing}`, "utf-8");
-      }
-    }
-  } else {
-    // Create new file with header
-    const newFile = `# Changelog
+			if (headerMatch) {
+				const headerEnd = (headerMatch.index ?? 0) + headerMatch[0].length;
+				const before = existing.slice(0, headerEnd);
+				const after = existing.slice(headerEnd);
+				const newContent = `${before}\n${cleanContent}\n${after}`;
+				writeFileSync(changelogPath, newContent, "utf-8");
+			} else {
+				writeFileSync(changelogPath, `${cleanContent}\n\n${existing}`, "utf-8");
+			}
+		}
+	} else {
+		// Create new file with header
+		const newFile = `# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -97,42 +109,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ${cleanContent}
 `;
-    writeFileSync(changelogPath, newFile, "utf-8");
-  }
+		writeFileSync(changelogPath, newFile, "utf-8");
+	}
 
-  return changelogPath;
+	return changelogPath;
 }
 
 /**
  * Copy text to clipboard (cross-platform)
  */
 async function copyToClipboard(text: string): Promise<void> {
-  const { exec } = await import("child_process");
-  const { promisify } = await import("util");
-  const execAsync = promisify(exec);
+	const { exec } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const execAsync = promisify(exec);
 
-  const platform = process.platform;
+	const platform = process.platform;
 
-  try {
-    if (platform === "darwin") {
-      // macOS
-      await execAsync(`echo ${JSON.stringify(text)} | pbcopy`);
-    } else if (platform === "linux") {
-      // Linux - try xclip first, then xsel
-      try {
-        await execAsync(`echo ${JSON.stringify(text)} | xclip -selection clipboard`);
-      } catch {
-        await execAsync(`echo ${JSON.stringify(text)} | xsel --clipboard --input`);
-      }
-    } else if (platform === "win32") {
-      // Windows
-      await execAsync(`echo ${JSON.stringify(text)} | clip`);
-    } else {
-      throw new Error(`Unsupported platform: ${platform}`);
-    }
-  } catch (error: any) {
-    throw new Error(`Failed to copy to clipboard: ${error.message}`);
-  }
+	try {
+		if (platform === "darwin") {
+			// macOS
+			await execAsync(`echo ${JSON.stringify(text)} | pbcopy`);
+		} else if (platform === "linux") {
+			// Linux - try xclip first, then xsel
+			try {
+				await execAsync(
+					`echo ${JSON.stringify(text)} | xclip -selection clipboard`,
+				);
+			} catch {
+				await execAsync(
+					`echo ${JSON.stringify(text)} | xsel --clipboard --input`,
+				);
+			}
+		} else if (platform === "win32") {
+			// Windows
+			await execAsync(`echo ${JSON.stringify(text)} | clip`);
+		} else {
+			throw new Error(`Unsupported platform: ${platform}`);
+		}
+	} catch (error) {
+		throw new Error(
+			`Failed to copy to clipboard: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 /**
@@ -141,196 +159,255 @@ async function copyToClipboard(text: string): Promise<void> {
  * - Lets you select a starting point
  * - Generates a changelog up to the selected point
  */
-export async function changelogCommand(options: ChangelogOptions): Promise<void> {
-  p.intro(color.bgYellow(color.black(" changelog ")));
+export async function changelogCommand(
+	options: ChangelogOptions,
+): Promise<void> {
+	p.intro(color.bgYellow(color.black(" changelog ")));
 
-  // Check if we're in a git repo
-  if (!(await isGitRepo())) {
-    p.cancel("Not a git repository");
-    cleanup();
-    process.exit(1);
-  }
+	// Check if we're in a git repo
+	if (!(await isGitRepo())) {
+		p.cancel("Not a git repository");
+		cleanup();
+		process.exit(1);
+	}
 
-  let fromRef = options.from;
-  const toRef = options.to || "HEAD";
+	let fromRef = options.from;
+	const toRef = options.to || "HEAD";
 
-  // If no --from specified, show options to select
-  if (!fromRef) {
-    const s = p.spinner();
-    s.start("Fetching releases and commits");
+	// If no --from specified, show options to select
+	if (!fromRef) {
+		const s = p.spinner();
+		s.start("Fetching releases and commits");
 
-    // Check for commits since last changelog
-    const { hasCommits, lastEntry, commitCount } = await hasCommitsSinceLastChangelog();
+		// Check for commits since last changelog
+		const { hasCommits, lastEntry, commitCount } =
+			await hasCommitsSinceLastChangelog();
 
-    const releases = await getReleases();
-    const recentLog = await getLog({ limit: 20 });
-    const recentCommits = recentLog.split("\n").filter(Boolean);
+		const releases = await getReleases();
+		const recentLog = await getLog({ limit: 20 });
+		const recentCommits = recentLog.split("\n").filter(Boolean);
 
-    s.stop("Found releases and commits");
+		s.stop("Found releases and commits");
 
-    // Build choices
-    type SelectOption = { value: string; label: string; hint?: string };
-    const selectOptions: SelectOption[] = [];
+		// Build choices
+		type SelectOption = { value: string; label: string; hint?: string };
+		const selectOptions: SelectOption[] = [];
 
-    // Add "since last changelog" option if applicable
-    if (hasCommits && lastEntry) {
-      selectOptions.push({
-        value: `__last__:${lastEntry.toCommitHash}`,
-        label: color.green(`Since last changelog (${commitCount} new commits)`),
-        hint: formatHistoryEntry(lastEntry),
-      });
-    }
+		// Add "since last changelog" option if applicable
+		if (hasCommits && lastEntry) {
+			selectOptions.push({
+				value: `__last__:${lastEntry.toCommitHash}`,
+				label: color.green(`Since last changelog (${commitCount} new commits)`),
+				hint: formatHistoryEntry(lastEntry),
+			});
+		}
 
-    // Add releases
-    if (releases.length > 0) {
-      releases.slice(0, 10).forEach((tag) => {
-        selectOptions.push({
-          value: tag,
-          label: tag,
-          hint: "release",
-        });
-      });
-    }
+		// Add releases
+		if (releases.length > 0) {
+			releases.slice(0, 10).forEach((tag) => {
+				selectOptions.push({
+					value: tag,
+					label: tag,
+					hint: "release",
+				});
+			});
+		}
 
-    // Add recent commits
-    if (recentCommits.length > 0) {
-      recentCommits.forEach((commitLine) => {
-        const [hash, ...msg] = commitLine.split(" ");
-        selectOptions.push({
-          value: hash,
-          label: `${color.yellow(hash)} ${msg.join(" ")}`,
-        });
-      });
-    }
+		// Add recent commits
+		if (recentCommits.length > 0) {
+			recentCommits.forEach((commitLine) => {
+				const [hash, ...msg] = commitLine.split(" ");
+				selectOptions.push({
+					value: hash,
+					label: `${color.yellow(hash)} ${msg.join(" ")}`,
+				});
+			});
+		}
 
-    if (selectOptions.length === 0) {
-      p.outro(color.yellow("No releases or commits found"));
-      cleanup();
-      process.exit(0);
-    }
+		if (selectOptions.length === 0) {
+			p.outro(color.yellow("No releases or commits found"));
+			cleanup();
+			process.exit(0);
+		}
 
-    const selectedRef = await p.select({
-      message: "Select starting point for changelog:",
-      options: selectOptions,
-    });
+		const selectedRef = await p.select({
+			message: "Select starting point for changelog:",
+			options: selectOptions,
+		});
 
-    if (p.isCancel(selectedRef)) {
-      p.cancel("Aborted");
-      cleanup();
-      process.exit(0);
-    }
+		if (p.isCancel(selectedRef)) {
+			p.cancel("Aborted");
+			cleanup();
+			process.exit(0);
+		}
 
-    // Handle "since last changelog" selection
-    const selectedValue = selectedRef as string;
-    if (selectedValue.startsWith("__last__:")) {
-      fromRef = selectedValue.replace("__last__:", "");
-    } else {
-      fromRef = selectedValue;
-    }
-  }
+		// Handle "since last changelog" selection
+		const selectedValue = selectedRef as string;
+		if (selectedValue.startsWith("__last__:")) {
+			fromRef = selectedValue.replace("__last__:", "");
+		} else {
+			fromRef = selectedValue;
+		}
+	}
 
-  // Get commits between refs
-  const s = p.spinner();
-  s.start(`Fetching commits ${fromRef}..${toRef}`);
+	// Ensure fromRef is defined at this point
+	if (!fromRef) {
+		p.cancel("No starting reference selected");
+		cleanup();
+		process.exit(1);
+	}
 
-  try {
-    const commits = await getCommitsBetween(fromRef!, toRef);
-    s.stop(`Found ${commits.length} commits`);
+	// Get commits between refs
+	const s = p.spinner();
+	s.start(`Fetching commits ${fromRef}..${toRef}`);
 
-    if (commits.length === 0) {
-      p.outro(color.yellow("No commits found in the specified range"));
-      cleanup();
-      process.exit(0);
-    }
+	try {
+		const commits = await getCommitsBetween(fromRef, toRef);
+		s.stop(`Found ${commits.length} commits`);
 
-    // Display commits
-    const commitsList = commits
-      .map((c) => color.dim(`  ${c.hash} ${c.message}`))
-      .join("\n");
-    p.log.info(`Commits to include in changelog:\n${commitsList}`);
+		if (commits.length === 0) {
+			p.outro(color.yellow("No commits found in the specified range"));
+			cleanup();
+			process.exit(0);
+		}
 
-    // Detect version bump
-    const versionBump = await detectVersionBump(fromRef!, toRef);
-    if (versionBump?.newVersion) {
-      p.log.success(`Version bump detected: ${color.cyan(versionBump.oldVersion || "none")} → ${color.cyan(versionBump.newVersion)}`);
-    }
+		// Display commits
+		const commitsList = commits
+			.map((c) => color.dim(`  ${c.hash} ${c.message}`))
+			.join("\n");
+		p.log.info(`Commits to include in changelog:\n${commitsList}`);
 
-    // Generate changelog
-    const genSpinner = p.spinner();
-    genSpinner.start("Generating changelog");
+		// Detect version bump
+		const versionBump = await detectVersionBump(fromRef, toRef);
+		if (versionBump?.newVersion) {
+			p.log.success(
+				`Version bump detected: ${color.cyan(versionBump.oldVersion || "none")} → ${color.cyan(versionBump.newVersion)}`,
+			);
+		}
 
-    try {
-      const changelog = await generateChangelog({
-        commits,
-        fromRef: fromRef!,
-        toRef,
-        version: versionBump?.newVersion,
-      });
+		// Generate changelog
+		const genSpinner = p.spinner();
+		genSpinner.start("Generating changelog");
 
-      genSpinner.stop("Changelog generated");
+		try {
+			const changelog = await generateChangelog({
+				commits,
+				fromRef: fromRef,
+				toRef,
+				version: versionBump?.newVersion,
+				modelOverride: options.model,
+			});
 
-      p.log.step(`Generated Changelog:\n\n${changelog}`);
+			genSpinner.stop("Changelog generated");
 
-      // Check if CHANGELOG.md exists to customize the label
-      const changelogFileExists = await changelogExists();
-      const saveLabel = changelogFileExists
-        ? "Update CHANGELOG.md"
-        : "Create CHANGELOG.md";
+			p.log.step(`Generated Changelog:\n\n${changelog}`);
 
-      // Ask what to do with it
-      const action = await p.select({
-        message: "What would you like to do?",
-        options: [
-          { value: "save", label: saveLabel },
-          { value: "copy", label: "Copy to clipboard" },
-          { value: "done", label: "Done" },
-        ],
-      });
+			// Check if CHANGELOG.md exists to customize the label
+			const changelogFileExists = await changelogExists();
 
-      if (p.isCancel(action)) {
-        p.cancel("Aborted");
-        cleanup();
-        process.exit(0);
-      }
+			// Handle --save and --copy flags (non-interactive)
+			if (options.save || options.copy) {
+				if (options.save) {
+					const saveSpinner = p.spinner();
+					const outputPath = options.output || (await getChangelogPath());
+					const actionWord = changelogFileExists ? "Updating" : "Creating";
+					saveSpinner.start(`${actionWord} ${outputPath}`);
 
-      if (action === "copy") {
-        try {
-          await copyToClipboard(changelog);
-          p.log.success("Copied to clipboard!");
-        } catch (error: any) {
-          p.log.error(`Failed to copy: ${error.message}`);
-        }
-      } else if (action === "save") {
-        const saveSpinner = p.spinner();
-        const actionWord = changelogFileExists ? "Updating" : "Creating";
-        saveSpinner.start(`${actionWord} CHANGELOG.md`);
+					try {
+						const filePath = await saveChangelog(
+							changelog,
+							changelogFileExists,
+							options.output,
+						);
+						const doneWord = changelogFileExists ? "Updated" : "Created";
+						saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
 
-        try {
-          const filePath = await saveChangelog(changelog, changelogFileExists);
-          const doneWord = changelogFileExists ? "Updated" : "Created";
-          saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
+						await addHistoryEntry(fromRef, toRef, commits.length);
+					} catch (error) {
+						saveSpinner.stop("Failed to save");
+						p.log.error(error instanceof Error ? error.message : String(error));
+					}
+				}
 
-          // Save to history after successful save
-          await addHistoryEntry(fromRef!, toRef, commits.length);
-        } catch (error: any) {
-          saveSpinner.stop("Failed to save");
-          p.log.error(error.message);
-        }
-      }
+				if (options.copy) {
+					try {
+						await copyToClipboard(changelog);
+						p.log.success("Copied to clipboard!");
+					} catch (error) {
+						p.log.error(
+							`Failed to copy: ${error instanceof Error ? error.message : String(error)}`,
+						);
+					}
+				}
 
-      p.outro(color.green("Done!"));
-      cleanup();
-      process.exit(0);
-    } catch (error: any) {
-      genSpinner.stop("Failed to generate changelog");
-      p.cancel(error.message);
-      cleanup();
-      process.exit(1);
-    }
-  } catch (error: any) {
-    s.stop("Failed to fetch commits");
-    p.cancel(error.message);
-    cleanup();
-    process.exit(1);
-  }
+				p.outro(color.green("Done!"));
+				cleanup();
+				process.exit(0);
+			}
+
+			// Interactive menu
+			const saveLabel = changelogFileExists
+				? "Update CHANGELOG.md"
+				: "Create CHANGELOG.md";
+
+			const action = await p.select({
+				message: "What would you like to do?",
+				options: [
+					{ value: "save", label: saveLabel },
+					{ value: "copy", label: "Copy to clipboard" },
+					{ value: "done", label: "Done" },
+				],
+			});
+
+			if (p.isCancel(action)) {
+				p.cancel("Aborted");
+				cleanup();
+				process.exit(0);
+			}
+
+			if (action === "copy") {
+				try {
+					await copyToClipboard(changelog);
+					p.log.success("Copied to clipboard!");
+				} catch (error) {
+					p.log.error(
+						`Failed to copy: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+			} else if (action === "save") {
+				const saveSpinner = p.spinner();
+				const actionWord = changelogFileExists ? "Updating" : "Creating";
+				saveSpinner.start(`${actionWord} CHANGELOG.md`);
+
+				try {
+					const filePath = await saveChangelog(
+						changelog,
+						changelogFileExists,
+						options.output,
+					);
+					const doneWord = changelogFileExists ? "Updated" : "Created";
+					saveSpinner.stop(`${doneWord} ${color.cyan(filePath)}`);
+
+					await addHistoryEntry(fromRef, toRef, commits.length);
+				} catch (error) {
+					saveSpinner.stop("Failed to save");
+					p.log.error(error instanceof Error ? error.message : String(error));
+				}
+			}
+
+			p.outro(color.green("Done!"));
+			cleanup();
+			process.exit(0);
+		} catch (error) {
+			genSpinner.stop("Failed to generate changelog");
+			p.cancel(error instanceof Error ? error.message : String(error));
+			cleanup();
+			process.exit(1);
+		}
+	} catch (error) {
+		s.stop("Failed to fetch commits");
+		p.cancel(error instanceof Error ? error.message : String(error));
+		cleanup();
+		process.exit(1);
+	}
 }
