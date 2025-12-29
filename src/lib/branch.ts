@@ -60,7 +60,6 @@ async function resolveBranchName(
   });
 
   if (p.isCancel(action) || action === "cancel") {
-    p.cancel("Aborted");
     return null;
   }
 
@@ -75,7 +74,6 @@ async function resolveBranchName(
     });
 
     if (p.isCancel(editedName)) {
-      p.cancel("Aborted");
       return null;
     }
 
@@ -105,7 +103,6 @@ async function resolveBranchName(
     });
 
     if (p.isCancel(confirmNew) || !confirmNew) {
-      p.cancel("Aborted");
       return null;
     }
   }
@@ -136,7 +133,6 @@ async function ensureUniqueBranchName(
     });
 
     if (p.isCancel(editedName)) {
-      p.cancel("Aborted");
       return null;
     }
 
@@ -180,7 +176,6 @@ export async function maybeCreateBranchForCommit(
     });
 
     if (p.isCancel(confirm)) {
-      p.cancel("Aborted");
       return "abort";
     }
 

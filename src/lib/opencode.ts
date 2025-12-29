@@ -124,7 +124,6 @@ export interface DeslopEditResult {
   sessionID: string;
   messageID: string;
   close: () => Promise<void>;
-  revert: () => Promise<boolean>;
 }
 
 export interface ChangelogGenerationOptions {
@@ -426,7 +425,6 @@ export async function runDeslopEdits(
     sessionID,
     messageID,
     close,
-    revert: async () => false,
   };
 }
 /**

@@ -5,6 +5,7 @@ import { getConfig } from "./config";
 import { runDeslopEdits } from "./opencode";
 import {
   getDiffBetween,
+  getDefaultBranch,
   getStagedDiff,
   getStatus,
   git,
@@ -13,6 +14,17 @@ import {
 
 export type DeslopFlowResult = "continue" | "abort" | "updated";
 
+export async function getAndValidateStagedDiff(
+  emptyMessage: string = "No diff content to analyze",
+): Promise<string | null> {
+  const diff = await getStagedDiff();
+  if (!diff) {
+    p.outro(color.yellow(emptyMessage));
+    return null;
+  }
+  return diff;
+}
+
 export interface DeslopFlowOptions {
   stagedDiff?: string;
   yes?: boolean;
@@ -20,16 +32,12 @@ export interface DeslopFlowOptions {
 }
 
 async function getBaseDiff(): Promise<{ baseRef: string; diff: string }> {
+  const defaultBranch = (await getDefaultBranch()) || "main";
   try {
-    const diff = await getDiffBetween("main", "HEAD");
-    return { baseRef: "main", diff };
+    const diff = await getDiffBetween(defaultBranch, "HEAD");
+    return { baseRef: defaultBranch, diff };
   } catch {
-    try {
-      const diff = await getDiffBetween("master", "HEAD");
-      return { baseRef: "master", diff };
-    } catch {
-      return { baseRef: "main", diff: "" };
-    }
+    return { baseRef: defaultBranch, diff: "" };
   }
 }
 
@@ -67,7 +75,7 @@ async function restoreGitSnapshot(snapshotRef: string): Promise<void> {
 }
 
 export async function maybeDeslopStagedChanges(
-  options: DeslopFlowOptions
+  options: DeslopFlowOptions,
 ): Promise<DeslopFlowResult> {
   const config = await getConfig();
   const autoDeslop = !!config.commit?.autoDeslop;
@@ -83,7 +91,6 @@ export async function maybeDeslopStagedChanges(
     });
 
     if (p.isCancel(confirm)) {
-      p.cancel("Aborted");
       return "abort";
     }
 
@@ -112,7 +119,6 @@ export async function maybeDeslopStagedChanges(
     });
 
     if (p.isCancel(extra)) {
-      p.cancel("Aborted");
       return "abort";
     }
 
@@ -126,7 +132,7 @@ export async function maybeDeslopStagedChanges(
     new Set([
       ...statusBefore.unstaged.filter((file) => !stagedFiles.includes(file)),
       ...statusBefore.untracked,
-    ])
+    ]),
   );
 
   const s = p.spinner();
@@ -188,7 +194,6 @@ export async function maybeDeslopStagedChanges(
       if (snapshotRef) {
         await restoreGitSnapshot(snapshotRef);
       }
-      p.cancel("Aborted");
       return "abort";
     }
 

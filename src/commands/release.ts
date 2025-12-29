@@ -14,13 +14,18 @@ import {
   getStagedDiff,
   type GitStatus,
 } from "../utils/git";
-import { generateCommitMessage, generateChangelog, updateChangelogFile, cleanup } from "../lib/opencode";
-import { maybeCreateBranchForCommit } from "../lib/branch";
-import { maybeDeslopStagedChanges } from "../lib/deslop";
 import {
-  addHistoryEntry,
-  getLastEntry,
-} from "../lib/history";
+  generateCommitMessage,
+  generateChangelog,
+  updateChangelogFile,
+  cleanup,
+} from "../lib/opencode";
+import { maybeCreateBranchForCommit } from "../lib/branch";
+import {
+  maybeDeslopStagedChanges,
+  getAndValidateStagedDiff,
+} from "../lib/deslop";
+import { addHistoryEntry, getLastEntry } from "../lib/history";
 
 export interface ReleaseOptions {
   from?: string;
@@ -56,7 +61,10 @@ async function changelogExists(): Promise<boolean> {
 /**
  * Save changelog to CHANGELOG.md
  */
-async function saveChangelog(content: string, useAI: boolean = true): Promise<string> {
+async function saveChangelog(
+  content: string,
+  useAI: boolean = true,
+): Promise<string> {
   const changelogPath = await getChangelogPath();
 
   let cleanContent = content
@@ -81,7 +89,11 @@ async function saveChangelog(content: string, useAI: boolean = true): Promise<st
         const headerEnd = headerMatch.index! + headerMatch[0].length;
         const before = existing.slice(0, headerEnd);
         const after = existing.slice(headerEnd);
-        writeFileSync(changelogPath, `${before}\n${cleanContent}\n${after}`, "utf-8");
+        writeFileSync(
+          changelogPath,
+          `${before}\n${cleanContent}\n${after}`,
+          "utf-8",
+        );
       } else {
         writeFileSync(changelogPath, `${cleanContent}\n\n${existing}`, "utf-8");
       }
@@ -113,7 +125,7 @@ function hasChanges(status: GitStatus): boolean {
 /**
  * Release command
  * Flow: commit -> changelog -> tag -> push
- * 
+ *
  * 1. Commit current changes (like `oc`)
  * 2. Generate and commit changelog
  * 3. Create git tag
@@ -147,10 +159,13 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
             .slice(0, 5)
             .map((f) => `  ${color.dim(f)}`)
             .join("\n");
-          const moreCount = status.unstaged.length + status.untracked.length - 5;
-          
-          p.log.info(`Unstaged changes:\n${filesPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`);
-          
+          const moreCount =
+            status.unstaged.length + status.untracked.length - 5;
+
+          p.log.info(
+            `Unstaged changes:\n${filesPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`,
+          );
+
           const shouldStage = await p.confirm({
             message: "Stage all changes?",
             initialValue: true,
@@ -178,11 +193,13 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
         .map((f) => `  ${color.green("+")} ${f}`)
         .join("\n");
       const moreCount = status.staged.length - 5;
-      p.log.success(`Staged changes:\n${stagedPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`);
+      p.log.success(
+        `Staged changes:\n${stagedPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`,
+      );
 
       // Get diff and generate commit message
-      let diff = await getStagedDiff();
-      
+      let diff: string | null = await getStagedDiff();
+
       if (diff) {
         const deslopResult = await maybeDeslopStagedChanges({
           stagedDiff: diff,
@@ -195,11 +212,12 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
         }
 
         if (deslopResult === "updated") {
-          diff = await getStagedDiff();
+          diff = await getAndValidateStagedDiff(
+            "No staged diff to commit after deslop",
+          );
         }
 
         if (!diff) {
-          p.log.info(color.dim("No staged diff to commit after deslop"));
         } else {
           const branchFlow = await maybeCreateBranchForCommit({
             diff,
@@ -213,7 +231,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 
           const genSpinner = p.spinner();
           genSpinner.start("Generating commit message");
-          
+
           const commitMessage = await generateCommitMessage({ diff });
           genSpinner.stop("Commit message generated");
 
@@ -293,7 +311,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
         p.log.success(`Version detected: ${color.cyan(version)}`);
       } else {
         const currentVersion = await getCurrentVersion();
-        
+
         if (!options.yes) {
           const inputVersion = await p.text({
             message: "Enter version for this release:",
@@ -301,7 +319,8 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
             initialValue: currentVersion || "",
             validate: (value) => {
               if (!value.trim()) return "Version is required";
-              if (!/^\d+\.\d+\.\d+/.test(value)) return "Invalid semver format (X.Y.Z)";
+              if (!/^\d+\.\d+\.\d+/.test(value))
+                return "Invalid semver format (X.Y.Z)";
             },
           });
 
@@ -337,15 +356,21 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
     });
 
     changelogSpinner.stop("Changelog generated");
-    p.log.info(`Changelog preview:\n${color.dim(changelog.slice(0, 500))}${changelog.length > 500 ? "..." : ""}`);
+    p.log.info(
+      `Changelog preview:\n${color.dim(changelog.slice(0, 500))}${changelog.length > 500 ? "..." : ""}`,
+    );
 
     // Save changelog
     const saveSpinner = p.spinner();
     const changelogFileExists = await changelogExists();
-    saveSpinner.start(`${changelogFileExists ? "Updating" : "Creating"} CHANGELOG.md`);
+    saveSpinner.start(
+      `${changelogFileExists ? "Updating" : "Creating"} CHANGELOG.md`,
+    );
 
     await saveChangelog(changelog, changelogFileExists);
-    saveSpinner.stop(`${changelogFileExists ? "Updated" : "Created"} CHANGELOG.md`);
+    saveSpinner.stop(
+      `${changelogFileExists ? "Updated" : "Created"} CHANGELOG.md`,
+    );
 
     // Commit changelog
     const changelogCommitSpinner = p.spinner();
@@ -364,15 +389,15 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
     p.log.step(color.bold("Step 3: Create tag"));
 
     const tagName = version.startsWith("v") ? version : `v${version}`;
-    
+
     let shouldTag = options.tag ?? true; // Default to true for release
-    
+
     if (!options.yes && !options.tag) {
       const tagConfirm = await p.confirm({
         message: `Create tag ${color.cyan(tagName)}?`,
         initialValue: true,
       });
-      
+
       if (p.isCancel(tagConfirm)) {
         p.cancel("Aborted");
         cleanup();
@@ -384,7 +409,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
     if (shouldTag) {
       const tagSpinner = p.spinner();
       tagSpinner.start(`Creating tag ${tagName}`);
-      
+
       try {
         await git(`tag ${tagName}`);
         tagSpinner.stop(`Created tag ${color.cyan(tagName)}`);
@@ -417,10 +442,14 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
           } catch (error: any) {
             pushSpinner.stop("Failed to push");
             p.log.warn(`Push failed: ${error.message}`);
-            p.log.info(`Push manually: ${color.cyan("git push origin HEAD --tags")}`);
+            p.log.info(
+              `Push manually: ${color.cyan("git push origin HEAD --tags")}`,
+            );
           }
         } else {
-          p.log.info(`Push when ready: ${color.cyan("git push origin HEAD --tags")}`);
+          p.log.info(
+            `Push when ready: ${color.cyan("git push origin HEAD --tags")}`,
+          );
         }
       } catch (error: any) {
         tagSpinner.stop("Failed to create tag");

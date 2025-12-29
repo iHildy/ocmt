@@ -99,7 +99,7 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
     forceNewBranchOnDefault: false,
     autoDeslop: false,
     branchModel: "opencode/gpt-5-nano",
-    deslopModel: "opencode/gpt-5-mini",
+    deslopModel: "opencode/gpt-5",
     model: "opencode/gpt-5-nano",
   },
   changelog: {
