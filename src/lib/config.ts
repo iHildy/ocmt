@@ -9,6 +9,7 @@ const CONFIG_DIR = ".oc";
 const COMMIT_CONFIG_FILE = "config.md";
 const CHANGELOG_CONFIG_FILE = "changelog.md";
 const JSON_CONFIG_FILE = "config.json";
+const DESLOP_CONFIG_FILE = "deslop.md";
 
 // Global config directory in user's home
 const GLOBAL_CONFIG_DIR = join(homedir(), ".oc");
@@ -231,6 +232,34 @@ How to test the changes (if applicable)
 5. Only return the title and body, no additional explanations
 `;
 
+const DEFAULT_DESLOP_CONFIG = `# Remove AI code slop
+
+Edit files directly using the available tools.
+
+Rules:
+- Only edit files listed under "Staged files" (if provided, including new files)
+- Do not edit files listed under "Not staged files" (if provided)
+- Do not edit any file that is not staged
+- Do not create new files
+- Keep changes minimal and consistent with the codebase
+- Thoroughly examine the full content of ALL staged files (not just the diff summary) and identify/remove AI slop from each one individually, including new files. Use file reading tools to inspect complete file contents before making edits.
+
+Instructions:
+Check the uncommited changes, and remove all AI generated slop introduced in this branch.
+This includes:
+- Extra comments that a human wouldn't add or is inconsistent with the rest of the file
+- Remove all verbose JSDoc comments that explain obvious function purposes.
+- Extra defensive checks or try/catch blocks that are abnormal for that area of the codebase (especially if called by trusted / validated codepaths)
+- Casts to any to get around type issues
+- Any other style that is inconsistent with the file
+
+Respond with:
+SUMMARY: <1-3 sentences>
+
+If no changes are needed, do not edit any files and respond with:
+SUMMARY: No changes required.
+`;
+
 const PR_CONFIG_FILE = "pr.md";
 
 async function getRepoRoot(): Promise<string> {
@@ -275,6 +304,10 @@ export async function getChangelogConfig(): Promise<string> {
 
 export async function getPRConfig(): Promise<string> {
   return getLayeredTextConfig(PR_CONFIG_FILE, DEFAULT_PR_CONFIG);
+}
+
+export async function getDeslopConfig(): Promise<string> {
+  return getLayeredTextConfig(DESLOP_CONFIG_FILE, DEFAULT_DESLOP_CONFIG);
 }
 
 export async function configExists(): Promise<boolean> {
