@@ -19,7 +19,8 @@
 		"lint:fix": "biome lint --write .",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"prepublishOnly": "bun run build"
+		"prepublishOnly": "bun run build",
+		"prepare": "husky"
 	},
 	"engines": {
 		"node": ">=18.0.0"
@@ -58,6 +59,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.10",
 		"@types/bun": "latest",
+		"husky": "^9.1.7",
 		"typescript": "^5.7.2"
 	}
 }

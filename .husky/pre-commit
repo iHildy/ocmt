@@ -1,0 +1,1 @@
+bun run format && git add -u && bun run lint && bun run build

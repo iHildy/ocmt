@@ -19,7 +19,7 @@ bun run build        # Build for production
 
 ### After Making Changes
 
-**CRITICAL: After modifying any code, always run:**
+**CRITICAL: After modifying any code related to core project functionality, always run and fix any warnings or errors in a feedback loop following best practices:**
 
 ```bash
 bun run typecheck && bun run build
