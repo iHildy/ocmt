@@ -27,8 +27,8 @@ const DEFAULT_COMMIT_MODEL = "opencode/gpt-5-nano";
 const DEFAULT_CHANGELOG_MODEL = "opencode/claude-sonnet-4-5";
 
 // Timeout constants
-const PERMISSION_PROMPT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for user to respond to permission
-const OPERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for overall operation
+const PERMISSION_PROMPT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for user to respond to permission
+const OPERATION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for overall operation
 
 type PermissionResponse = "once" | "always" | "reject";
 
@@ -280,33 +280,56 @@ function formatPermissionDescription(permission: Permission): string {
 	let description = title || `Permission requested: ${type}`;
 
 	if (type === "bash" || type === "shell") {
-		const command =
-			pattern ||
-			(metadata?.command as string) ||
-			(metadata?.cmd as string) ||
-			null;
-		if (command) {
+		const metadataCommand =
+			metadata && typeof metadata === "object" && "command" in metadata
+				? metadata.command
+				: null;
+		const metadataCmd =
+			metadata && typeof metadata === "object" && "cmd" in metadata
+				? metadata.cmd
+				: null;
+
+		const command = pattern || metadataCommand || metadataCmd || null;
+		if (command && (typeof command === "string" || Array.isArray(command))) {
 			const commandStr = Array.isArray(command) ? command.join(" ") : command;
 			description = `Run bash command:\n${color.cyan(commandStr)}`;
 		}
 	} else if (type === "edit" || type === "file") {
-		const filePath =
-			pattern || (metadata?.path as string) || (metadata?.file as string);
-		if (filePath) {
+		const metadataPath =
+			metadata && typeof metadata === "object" && "path" in metadata
+				? metadata.path
+				: null;
+		const metadataFile =
+			metadata && typeof metadata === "object" && "file" in metadata
+				? metadata.file
+				: null;
+
+		const filePath = pattern || metadataPath || metadataFile;
+		if (filePath && (typeof filePath === "string" || Array.isArray(filePath))) {
 			const pathStr = Array.isArray(filePath) ? filePath.join(", ") : filePath;
 			description = `Edit file:\n${color.cyan(pathStr)}`;
 		}
 	} else if (type === "webfetch") {
-		const url = pattern || (metadata?.url as string);
-		if (url) {
+		const metadataUrl =
+			metadata && typeof metadata === "object" && "url" in metadata
+				? metadata.url
+				: null;
+
+		const url = pattern || metadataUrl;
+		if (url && (typeof url === "string" || Array.isArray(url))) {
 			const urlStr = Array.isArray(url) ? url.join(", ") : url;
 			description = `Fetch URL:\n${color.cyan(urlStr)}`;
 		}
 	} else if (type === "doom_loop") {
 		description = `Doom loop detected (same tool called 3+ times with identical arguments).\nAllow continuation?`;
 	} else if (type === "external_directory") {
-		const path = pattern || (metadata?.path as string);
-		if (path) {
+		const metadataPath =
+			metadata && typeof metadata === "object" && "path" in metadata
+				? metadata.path
+				: null;
+
+		const path = pattern || metadataPath;
+		if (path && (typeof path === "string" || Array.isArray(path))) {
 			const pathStr = Array.isArray(path) ? path.join(", ") : path;
 			description = `Access file outside working directory:\n${color.cyan(pathStr)}`;
 		}
@@ -336,35 +359,32 @@ async function promptUserForPermission(
 	return result as PermissionResponse;
 }
 
+function isPermission(value: unknown): value is Permission {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const obj = value as Record<string, unknown>;
+	return "id" in obj && typeof obj.id === "string";
+}
+
 function isEventForSession(event: Event, sessionID: string): boolean {
-	if (!("properties" in event)) {
+	if (typeof event.properties !== "object" || !event.properties) {
 		return false;
 	}
 
-	const props = event.properties as Record<string, unknown>;
+	const checkList: unknown[] = [
+		event.properties,
+		(event.properties as Record<string, unknown>).info,
+		(event.properties as Record<string, unknown>).part,
+	];
 
-	if ("sessionID" in props && props.sessionID === sessionID) {
-		return true;
-	}
-
-	if (
-		"info" in props &&
-		typeof props.info === "object" &&
-		props.info !== null
-	) {
-		const info = props.info as Record<string, unknown>;
-		if ("sessionID" in info && info.sessionID === sessionID) {
-			return true;
-		}
-	}
-
-	if (
-		"part" in props &&
-		typeof props.part === "object" &&
-		props.part !== null
-	) {
-		const part = props.part as Record<string, unknown>;
-		if ("sessionID" in part && part.sessionID === sessionID) {
+	for (const item of checkList) {
+		if (
+			item &&
+			typeof item === "object" &&
+			"sessionID" in item &&
+			(item as { sessionID: string }).sessionID === sessionID
+		) {
 			return true;
 		}
 	}
@@ -432,6 +452,130 @@ async function resolveAssistantParts(
 	return [];
 }
 
+async function handlePermissionEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	permission: Permission,
+	spinner: ReturnType<typeof createSpinner> | null,
+	spinnerMessage: string,
+): Promise<void> {
+	if (spinner) {
+		spinner.stop("Permission required");
+	}
+
+	let response: PermissionResponse;
+	try {
+		const timeoutPromise = new Promise<PermissionResponse>((resolve) => {
+			setTimeout(() => resolve("reject"), PERMISSION_PROMPT_TIMEOUT_MS);
+		});
+
+		response = await Promise.race([
+			promptUserForPermission(permission),
+			timeoutPromise,
+		]);
+	} catch {
+		response = "reject";
+	}
+
+	try {
+		await client.postSessionIdPermissionsPermissionId({
+			path: { id: sessionID, permissionID: permission.id },
+			body: { response },
+		});
+	} catch (err) {
+		p.log.warn(
+			`Failed to send permission response: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	if (spinner && spinnerMessage) {
+		spinner.start(spinnerMessage);
+	}
+}
+
+async function handleMessageUpdatedEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	info: unknown,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<EventStreamResult | null> {
+	if (
+		typeof info === "object" &&
+		info !== null &&
+		"role" in info &&
+		info.role === "assistant"
+	) {
+		const assistantMessage = info as AssistantMessage;
+		if (isAssistantMessageComplete(assistantMessage)) {
+			const parts = await resolveAssistantParts(
+				client,
+				sessionID,
+				assistantMessage,
+				collectedParts,
+			);
+			return {
+				assistantMessage,
+				parts,
+				error: null,
+			};
+		}
+	}
+	return null;
+}
+
+function handleSessionErrorEvent(
+	errorProps: Record<string, unknown>,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): EventStreamResult {
+	const errorData = errorProps.error as
+		| { name: string; data?: { message?: string } }
+		| undefined;
+	let sessionError: Error;
+
+	if (errorData) {
+		const errorMessage =
+			"data" in errorData && errorData.data
+				? errorData.data.message || errorData.name
+				: errorData.name;
+		sessionError = new Error(errorMessage || "Session error occurred");
+	} else {
+		sessionError = new Error("Unknown session error");
+	}
+
+	const parts = assistantMessage
+		? getCollectedPartsForMessage(collectedParts, assistantMessage.id)
+		: [];
+
+	return {
+		assistantMessage,
+		parts,
+		error: sessionError,
+	};
+}
+
+async function handleSessionIdleEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<EventStreamResult | null> {
+	if (assistantMessage && isAssistantMessageComplete(assistantMessage)) {
+		const parts = await resolveAssistantParts(
+			client,
+			sessionID,
+			assistantMessage,
+			collectedParts,
+		);
+		return {
+			assistantMessage,
+			parts,
+			error: null,
+		};
+	}
+	return null;
+}
+
 async function processEventStream(
 	client: OpencodeClient,
 	sessionID: string,
@@ -475,65 +619,39 @@ async function processEventStream(
 
 			switch (event.type) {
 				case "permission.updated": {
-					const permission = event.properties as Permission;
-
-					if (spinner) {
-						spinner.stop("Permission required");
+					if (!isPermission(event.properties)) {
+						p.log.warn("Invalid permission event properties");
+						break;
 					}
-
-					let response: PermissionResponse;
-					try {
-						const timeoutPromise = new Promise<PermissionResponse>(
-							(resolve) => {
-								setTimeout(
-									() => resolve("reject"),
-									PERMISSION_PROMPT_TIMEOUT_MS,
-								);
-							},
-						);
-
-						response = await Promise.race([
-							promptUserForPermission(permission),
-							timeoutPromise,
-						]);
-					} catch {
-						response = "reject";
-					}
-
-					try {
-						await client.postSessionIdPermissionsPermissionId({
-							path: { id: sessionID, permissionID: permission.id },
-							body: { response },
-						});
-					} catch (err) {
-						p.log.warn(
-							`Failed to send permission response: ${err instanceof Error ? err.message : String(err)}`,
-						);
-					}
-
-					if (spinner && spinnerMessage) {
-						spinner.start(spinnerMessage);
-					}
+					await handlePermissionEvent(
+						client,
+						sessionID,
+						event.properties,
+						spinner,
+						spinnerMessage,
+					);
 					break;
 				}
 
 				case "message.updated": {
 					const info = event.properties.info;
-					if (info.role === "assistant") {
+					const result = await handleMessageUpdatedEvent(
+						client,
+						sessionID,
+						info,
+						collectedParts,
+					);
+					if (result) {
+						assistantMessage = result.assistantMessage;
+						return result;
+					}
+					if (
+						typeof info === "object" &&
+						info !== null &&
+						"role" in info &&
+						info.role === "assistant"
+					) {
 						assistantMessage = info as AssistantMessage;
-						if (isAssistantMessageComplete(assistantMessage)) {
-							const parts = await resolveAssistantParts(
-								client,
-								sessionID,
-								assistantMessage,
-								collectedParts,
-							);
-							return {
-								assistantMessage,
-								parts,
-								error: null,
-							};
-						}
 					}
 					break;
 				}
@@ -545,55 +663,34 @@ async function processEventStream(
 				}
 
 				case "session.error": {
-					const errorProps = event.properties;
-					const errorData = errorProps.error;
-					if (errorData) {
-						const errorMessage =
-							"data" in errorData && errorData.data
-								? (errorData.data as { message?: string }).message ||
-									errorData.name
-								: errorData.name;
-						sessionError = new Error(errorMessage || "Session error occurred");
-					} else {
-						sessionError = new Error("Unknown session error");
-					}
-					const parts = assistantMessage
-						? getCollectedPartsForMessage(collectedParts, assistantMessage.id)
-						: [];
-					return {
+					return handleSessionErrorEvent(
+						event.properties as Record<string, unknown>,
 						assistantMessage,
-						parts,
-						error: sessionError,
-					};
+						collectedParts,
+					);
 				}
 
 				case "session.idle": {
-					if (
-						assistantMessage &&
-						isAssistantMessageComplete(assistantMessage)
-					) {
-						const parts = await resolveAssistantParts(
-							client,
-							sessionID,
-							assistantMessage,
-							collectedParts,
-						);
-						return {
-							assistantMessage,
-							parts,
-							error: null,
-						};
+					const result = await handleSessionIdleEvent(
+						client,
+						sessionID,
+						assistantMessage,
+						collectedParts,
+					);
+					if (result) {
+						return result;
 					}
 					break;
 				}
 			}
 		}
-	} catch {
+	} catch (streamError) {
 		if (!reconnectAttempted) {
 			reconnectAttempted = true;
+			p.log.warn(
+				`Event stream disconnected: ${streamError instanceof Error ? streamError.message : String(streamError)}`,
+			);
 			try {
-				eventStream = await connectToEventStream();
-
 				const sessionStatus = await client.session.get({
 					path: { id: sessionID },
 				});
