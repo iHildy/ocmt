@@ -12,7 +12,6 @@ import {
   type OpencodeClient,
 } from "@opencode-ai/sdk";
 import { exec } from "child_process";
-import { createServer } from "net";
 import { promisify } from "util";
 import { getCommitConfig, getChangelogConfig, getConfig } from "./config";
 
@@ -32,7 +31,6 @@ interface ModelConfig {
  * Falls back to "opencode" provider if no slash is present
  */
 function parseModelString(modelStr: string): ModelConfig {
-  // Validate input is not empty
   const trimmedInput = modelStr.trim();
   if (!trimmedInput) {
     throw new Error(
@@ -45,7 +43,6 @@ function parseModelString(modelStr: string): ModelConfig {
     const providerID = trimmedInput.substring(0, slashIndex).trim();
     const modelID = trimmedInput.substring(slashIndex + 1).trim();
 
-    // Validate both parts are non-empty
     if (!providerID || !modelID) {
       throw new Error(
         "Invalid model string: expected 'provider/model' with non-empty parts"
@@ -55,7 +52,6 @@ function parseModelString(modelStr: string): ModelConfig {
     return { providerID, modelID };
   }
 
-  // Default to "opencode" provider if no slash
   return { providerID: "opencode", modelID: trimmedInput };
 }
 
@@ -98,6 +94,7 @@ async function getChangelogModel(): Promise<ModelConfig> {
 // Server state
 let clientInstance: OpencodeClient | null = null;
 let serverInstance: { close: () => void } | null = null;
+const DEFAULT_OPENCODE_URL = "http://localhost:4096";
 
 export interface CommitGenerationOptions {
   diff: string;
@@ -115,6 +112,7 @@ export interface DeslopGenerationOptions {
   baseRef?: string;
   extraPrompt?: string;
   stagedFiles?: string[];
+  notStagedFiles?: string[];
 }
 
 export interface DeslopEditResult {
@@ -172,10 +170,26 @@ async function getClient(): Promise<OpencodeClient> {
     return clientInstance;
   }
 
+  const envBaseUrl = process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
+  if (envBaseUrl?.trim()) {
+    try {
+      const client = createOpencodeClient({
+        baseUrl: envBaseUrl.trim(),
+      });
+      await client.config.get();
+      clientInstance = client;
+      return client;
+    } catch {
+      p.log.warn(
+        `Failed to connect to OpenCode server at ${envBaseUrl}. Falling back to local server.`
+      );
+    }
+  }
+
   // Try connecting to existing server first
   try {
     const client = createOpencodeClient({
-      baseUrl: "http://localhost:4096",
+      baseUrl: DEFAULT_OPENCODE_URL,
     });
     // Test connection
     await client.config.get();
@@ -231,70 +245,6 @@ async function getClient(): Promise<OpencodeClient> {
   }
 }
 
-async function getAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.on("error", (error) => {
-      reject(error);
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close(() => {
-          reject(new Error("Failed to allocate a local port"));
-        });
-        return;
-      }
-      const { port } = address;
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(port);
-      });
-    });
-  });
-}
-
-async function createIsolatedClient(): Promise<{
-  client: OpencodeClient;
-  close: () => void;
-}> {
-  if (!(await isOpencodeInstalled())) {
-    p.log.error("OpenCode CLI is not installed");
-    p.log.info(
-      `Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`
-    );
-    process.exit(1);
-  }
-
-  try {
-    const port = await getAvailablePort();
-    const opencode = await createOpencode({
-      timeout: 10000,
-      port,
-    });
-
-    if (!(await checkAuth(opencode.client))) {
-      opencode.server.close();
-      p.log.warn("Not authenticated with OpenCode");
-      p.log.info(`Run ${color.cyan("opencode auth")} to authenticate`);
-      process.exit(1);
-    }
-
-    return {
-      client: opencode.client,
-      close: () => opencode.server.close(),
-    };
-   } catch (error: any) {
-     p.log.error(`Failed to start OpenCode server: ${error.message}`);
-     p.log.info(`Make sure OpenCode is installed and configured correctly`);
-     process.exit(1);
-   }
- }
-
 /**
  * Extract text content from AI response parts
  */
@@ -307,21 +257,6 @@ function extractTextFromParts(parts: any[]): string {
   return textParts.trim();
 }
 
-async function getToolAllowList(
-  client: OpencodeClient
-): Promise<Record<string, boolean> | undefined> {
-  try {
-    const tools = await client.tool.ids();
-    const toolIds = tools.data ?? [];
-    if (!toolIds.length) {
-      return undefined;
-    }
-    return Object.fromEntries(toolIds.map((id) => [id, true]));
-  } catch {
-    return undefined;
-  }
-}
-
 function extractDeslopSummary(text: string): string | null {
   const summaryMatch = text.match(/SUMMARY:\s*([\s\S]*)$/i);
   if (summaryMatch) {
@@ -332,14 +267,6 @@ function extractDeslopSummary(text: string): string | null {
   return trimmed ? trimmed : null;
 }
 
-function isFetchFailed(error: unknown): boolean {
-  const message =
-    typeof (error as { message?: unknown })?.message === "string"
-      ? ((error as { message: string }).message as string)
-      : "";
-  return message.toLowerCase().includes("fetch failed");
-}
-
 function buildDeslopPrompt(options: DeslopGenerationOptions): string {
   const {
     stagedDiff,
@@ -347,10 +274,15 @@ function buildDeslopPrompt(options: DeslopGenerationOptions): string {
     baseRef = "main",
     extraPrompt,
     stagedFiles,
+    notStagedFiles,
   } = options;
   const filesList =
     stagedFiles && stagedFiles.length > 0
       ? stagedFiles.map((file) => `- ${file}`).join("\n")
+      : "";
+  const notStagedList =
+    notStagedFiles && notStagedFiles.length > 0
+      ? notStagedFiles.map((file) => `- ${file}`).join("\n")
       : "";
 
   let prompt = `# Remove AI code slop
@@ -359,6 +291,8 @@ Edit files directly using the available tools. Do not output a patch. Apply chan
 
 Rules:
 - Only edit files listed under "Staged files" (if provided)
+- Do not edit files listed under "Not staged files" (if provided)
+- Do not edit any file that is not staged
 - Do not create new files
 - Remove AI-generated slop (unnecessary comments, excessive defensive code, inconsistent style)
 - Keep changes minimal and consistent with the codebase
@@ -372,6 +306,9 @@ SUMMARY: No changes required.
 
   if (filesList) {
     prompt += `\nStaged files:\n${filesList}\n`;
+  }
+  if (notStagedList) {
+    prompt += `\nNot staged files:\n${notStagedList}\n`;
   }
 
   prompt += `\nDiff against ${baseRef}:\n\`\`\`diff\n${baseDiff || ""}\n\`\`\`\n\nStaged diff to clean up:\n\`\`\`diff\n${stagedDiff}\n\`\`\``;
@@ -398,15 +335,12 @@ async function runDeslopEditsWithClient(
       throw new Error("Failed to create session");
     }
 
-    const tools = await getToolAllowList(client);
-
     let result;
     try {
       result = await client.session.prompt({
         path: { id: session.data.id },
         body: {
           model: deslopModel,
-          tools,
           parts: [{ type: "text", text: prompt }],
         },
       });
@@ -453,23 +387,9 @@ export async function runDeslopEdits(
   const deslopModel = await getDeslopModel();
   const prompt = buildDeslopPrompt(options);
 
-  const isolated = await createIsolatedClient();
-  try {
-    return await runDeslopEditsWithClient(
-      isolated.client,
-      isolated.close,
-      prompt,
-      deslopModel
-    );
-  } catch (error) {
-    if (!isFetchFailed(error)) {
-      throw error;
-    }
-  }
-
-  const fallbackClient = await getClient();
+  const client = await getClient();
   return runDeslopEditsWithClient(
-    fallbackClient,
+    client,
     () => {},
     prompt,
     deslopModel

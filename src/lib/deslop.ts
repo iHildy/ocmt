@@ -1,12 +1,15 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { spawn } from "child_process";
-import { existsSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
 import { getConfig } from "./config";
 import { runDeslopEdits } from "./opencode";
-import { getDiffBetween, getStagedDiff, getStatus, stageFiles } from "../utils/git";
+import {
+  getDiffBetween,
+  getStagedDiff,
+  getStatus,
+  git,
+  stageFiles,
+} from "../utils/git";
 
 export type DeslopFlowResult = "continue" | "abort" | "updated";
 
@@ -30,38 +33,21 @@ async function getBaseDiff(): Promise<{ baseRef: string; diff: string }> {
   }
 }
 
-function resolveLocalCritiqueBin(): string | null {
-  const startDir = dirname(fileURLToPath(import.meta.url));
-  let currentDir = startDir;
-
-  for (let i = 0; i < 6; i += 1) {
-    const candidate = join(currentDir, "node_modules", ".bin", "critique");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-
-    const parentDir = dirname(currentDir);
-    if (parentDir === currentDir) {
-      break;
-    }
-    currentDir = parentDir;
+async function createGitSnapshotRef(): Promise<string> {
+  const snapshotRef = await git("stash create");
+  if (!snapshotRef) {
+    throw new Error("Failed to create git snapshot");
   }
-
-  return null;
+  return snapshotRef;
 }
 
-async function runCritiqueCommand(
-  command: string,
-  args: string[]
-): Promise<"ok" | "missing" | "failed"> {
+async function runGitDifftool(snapshotRef: string): Promise<"ok" | "failed"> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: "inherit" });
+    const child = spawn("git", ["difftool", snapshotRef], {
+      stdio: "inherit",
+    });
 
-    child.on("error", (error: any) => {
-      if (error?.code === "ENOENT") {
-        resolve("missing");
-        return;
-      }
+    child.on("error", () => {
       resolve("failed");
     });
 
@@ -71,21 +57,13 @@ async function runCritiqueCommand(
   });
 }
 
-async function reviewWithCritique(): Promise<"ok" | "missing" | "failed"> {
-  const localBin = resolveLocalCritiqueBin();
-  if (localBin) {
-    const localResult = await runCritiqueCommand(localBin, ["--staged"]);
-    if (localResult !== "missing") {
-      return localResult;
-    }
+async function restoreGitSnapshot(snapshotRef: string): Promise<void> {
+  await git(`restore --source ${snapshotRef} --worktree -- .`);
+  try {
+    await git(`restore --source ${snapshotRef}^2 --staged -- .`);
+  } catch {
+    await git(`restore --source ${snapshotRef} --staged -- .`);
   }
-
-  const pathResult = await runCritiqueCommand("critique", ["--staged"]);
-  if (pathResult !== "missing") {
-    return pathResult;
-  }
-
-  return runCritiqueCommand("bunx", ["critique", "--staged"]);
 }
 
 export async function maybeDeslopStagedChanges(
@@ -138,64 +116,50 @@ export async function maybeDeslopStagedChanges(
       return "abort";
     }
 
-    const extraValue = typeof extra === "string" ? extra : "";
-    extraPrompt = extraValue.trim() || undefined;
+    extraPrompt =
+      typeof extra === "string" ? extra.trim() || undefined : undefined;
   }
 
   const statusBefore = await getStatus();
   const stagedFiles = statusBefore.staged;
-  const overlapping = statusBefore.unstaged.filter((file) =>
-    stagedFiles.includes(file)
+  const notStagedFiles = Array.from(
+    new Set([
+      ...statusBefore.unstaged.filter((file) => !stagedFiles.includes(file)),
+      ...statusBefore.untracked,
+    ])
   );
-
-  if (overlapping.length > 0 && !options.yes) {
-    p.log.warn(
-      "Unstaged edits detected in staged files. Deslop will restage those files."
-    );
-    const overlapList = overlapping
-      .map((file) => `  ${color.dim(file)}`)
-      .join("\n");
-    p.log.info(`Affected files:\n${overlapList}`);
-
-    const proceed = await p.confirm({
-      message: "Continue deslop and restage staged files?",
-      initialValue: false,
-    });
-
-    if (p.isCancel(proceed) || !proceed) {
-      p.cancel("Aborted");
-      return "abort";
-    }
-  }
 
   const s = p.spinner();
   s.start("Deslopping staged changes");
 
   let deslopSession: Awaited<ReturnType<typeof runDeslopEdits>> | null = null;
+  let snapshotRef: string | null = null;
 
   try {
+    snapshotRef = await createGitSnapshotRef();
+
     deslopSession = await runDeslopEdits({
       stagedDiff,
       baseDiff,
       baseRef,
       extraPrompt,
       stagedFiles,
+      notStagedFiles,
     });
-
-    await stageFiles(stagedFiles);
-    const updatedDiff = await getStagedDiff();
 
     const summary = deslopSession.summary?.trim();
     const fallbackSummary = "Deslop completed with minor cleanup adjustments.";
-    const didChange = !!updatedDiff && updatedDiff !== stagedDiff;
+    deslopSession.close();
+    deslopSession = null;
+
+    await stageFiles(stagedFiles);
+
+    const updatedDiff = await getStagedDiff();
+    const didChange = updatedDiff !== stagedDiff;
 
     if (!didChange) {
       s.stop("No deslop changes needed");
-      if (summary) {
-        p.log.step(summary);
-      } else {
-        p.log.step("No deslop changes were required.");
-      }
+      p.log.step(summary || "No deslop changes were required.");
       deslopSession.close();
       return "continue";
     }
@@ -208,13 +172,11 @@ export async function maybeDeslopStagedChanges(
       return "updated";
     }
 
-    const reviewResult = await reviewWithCritique();
-    if (reviewResult === "missing") {
-      p.log.warn(
-        `critique is not available. Install Bun and run: ${color.cyan("bunx critique")}`
-      );
-    } else if (reviewResult === "failed") {
-      p.log.warn("critique exited with an error. Review manually if needed.");
+    const diffResult = snapshotRef
+      ? await runGitDifftool(snapshotRef)
+      : "failed";
+    if (diffResult === "failed") {
+      p.log.warn("git difftool failed. Review manually if needed.");
     }
 
     const action = await p.select({
@@ -226,35 +188,33 @@ export async function maybeDeslopStagedChanges(
     });
 
     if (p.isCancel(action)) {
-      await deslopSession.revert();
-      await stageFiles(stagedFiles);
-      deslopSession.close();
+      if (snapshotRef) {
+        await restoreGitSnapshot(snapshotRef);
+      }
       p.cancel("Aborted");
       return "abort";
     }
 
     if (action === "reject") {
-      await deslopSession.revert();
-      await stageFiles(stagedFiles);
-      deslopSession.close();
+      if (snapshotRef) {
+        await restoreGitSnapshot(snapshotRef);
+      }
       p.log.info(color.dim("Deslop changes reverted"));
       return "continue";
     }
 
     p.log.step(summary || fallbackSummary);
-    deslopSession.close();
     return "updated";
   } catch (error: any) {
     s.stop("Deslop failed");
-    if (deslopSession) {
+    if (snapshotRef) {
       try {
-        await deslopSession.revert();
-        await stageFiles(stagedFiles);
+        await restoreGitSnapshot(snapshotRef);
       } catch {
         // Ignore cleanup errors
       }
-      deslopSession.close();
     }
+    deslopSession?.close();
     p.cancel(error.message);
     return "abort";
   }
