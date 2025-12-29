@@ -11,7 +11,7 @@ import {
   createOpencodeClient,
   type OpencodeClient,
 } from "@opencode-ai/sdk";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { getCommitConfig, getChangelogConfig, getConfig } from "./config";
 
@@ -320,65 +320,74 @@ SUMMARY: No changes required.
   return prompt;
 }
 
-async function runDeslopEditsWithClient(
-  client: OpencodeClient,
-  close: () => void,
+function getOpencodeAttachUrl(): string | null {
+  const url = process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
+  return url?.trim() || null;
+}
+
+function formatModel(model: ModelConfig): string {
+  return `${model.providerID}/${model.modelID}`;
+}
+
+function stripAnsi(input: string): string {
+  return input.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+async function runDeslopEditsWithCli(
   prompt: string,
   deslopModel: ModelConfig
-): Promise<DeslopEditResult> {
-  try {
-    const session = await client.session.create({
-      body: { title: "oc-deslop" },
+): Promise<string> {
+  if (!(await isOpencodeInstalled())) {
+    p.log.error("OpenCode CLI is not installed");
+    p.log.info(
+      `Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`
+    );
+    process.exit(1);
+  }
+
+  const args = ["run", "--title", "oc-deslop", "--model", formatModel(deslopModel)];
+  const attachUrl = getOpencodeAttachUrl();
+  if (attachUrl) {
+    args.push("--attach", attachUrl);
+  }
+  args.push(prompt);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("opencode", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: process.cwd(),
     });
 
-    if (!session.data) {
-      throw new Error("Failed to create session");
-    }
+    let stdout = "";
+    let stderr = "";
 
-    let result;
-    try {
-      result = await client.session.prompt({
-        path: { id: session.data.id },
-        body: {
-          model: deslopModel,
-          parts: [{ type: "text", text: prompt }],
-        },
-      });
-    } catch (err: any) {
-      await client.session.delete({ path: { id: session.data.id } });
-      throw new Error(
-        `Model request failed (${deslopModel.providerID}/${deslopModel.modelID}): ${err.message}`
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(new Error(`Failed to run opencode CLI: ${error.message}`));
+    });
+
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve(stripAnsi(stdout));
+        return;
+      }
+      const details = stripAnsi(stderr || stdout).trim();
+      reject(
+        new Error(
+          `OpenCode CLI exited with code ${code}${
+            details ? `: ${details}` : ""
+          }`
+        )
       );
-    }
-
-    if (!result.data) {
-      await client.session.delete({ path: { id: session.data.id } });
-      throw new Error(
-        `Failed to get AI response from ${deslopModel.providerID}/${deslopModel.modelID}`
-      );
-    }
-
-    const message = extractTextFromParts(result.data.parts || []);
-    const summary = message ? extractDeslopSummary(message) : null;
-    const messageID = result.data.info.id;
-
-    return {
-      summary,
-      sessionID: session.data.id,
-      messageID,
-      close,
-      revert: async () => {
-        const reverted = await client.session.revert({
-          path: { id: session.data.id },
-          body: { messageID },
-        });
-        return !!reverted.data;
-      },
-    };
-  } catch (error) {
-    close();
-    throw error;
-  }
+    });
+  });
 }
 
 export async function runDeslopEdits(
@@ -387,13 +396,16 @@ export async function runDeslopEdits(
   const deslopModel = await getDeslopModel();
   const prompt = buildDeslopPrompt(options);
 
-  const client = await getClient();
-  return runDeslopEditsWithClient(
-    client,
-    () => {},
-    prompt,
-    deslopModel
-  );
+  const message = await runDeslopEditsWithCli(prompt, deslopModel);
+  const summary = message ? extractDeslopSummary(message) : null;
+
+  return {
+    summary,
+    sessionID: "cli",
+    messageID: "cli",
+    close: () => {},
+    revert: async () => false,
+  };
 }
 /**
  * Run a prompt using the commit model
