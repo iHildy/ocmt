@@ -18,7 +18,7 @@ import {
 	getConfig,
 	getPRConfig,
 } from "./config";
-import { type createSpinner } from "../utils/ui";
+import type { createSpinner } from "../utils/ui";
 
 const execAsync = promisify(exec);
 
