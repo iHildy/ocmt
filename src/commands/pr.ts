@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { isGitRepo, getCurrentBranch, getDefaultBranch } from "../utils/git";
+import { isGitRepo } from "../utils/git";
 import { runPRFlow } from "../lib/pr";
 import { cleanup } from "../lib/opencode";
 
@@ -17,29 +17,11 @@ export async function prCommand(options: PROptions): Promise<void> {
     process.exit(1);
   }
 
-  const currentBranch = await getCurrentBranch();
-  if (!currentBranch) {
-    p.cancel("Not on a branch");
-    cleanup();
-    process.exit(1);
-  }
-
-  const defaultBranch = await getDefaultBranch();
-  if (currentBranch === defaultBranch) {
-    p.cancel(`Cannot create PR from default branch (${defaultBranch})`);
-    cleanup();
-    process.exit(1);
-  }
-
-  p.log.info(`Current branch: ${color.cyan(currentBranch)}`);
-
   try {
     const result = await runPRFlow(options);
 
     switch (result) {
       case "created":
-        p.outro(color.green("Done!"));
-        break;
       case "browser":
         p.outro(color.green("Done!"));
         break;

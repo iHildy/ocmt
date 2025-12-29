@@ -203,6 +203,7 @@ export async function maybeDeslopStagedChanges(
     if (summary) p.log.step(summary);
     return "updated";
   } catch (error) {
+    s.stop("Deslop failed");
     if (snapshotRef) {
       try {
         await restoreGitSnapshot(snapshotRef);

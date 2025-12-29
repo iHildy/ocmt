@@ -139,7 +139,6 @@ function buildNewPRUrl(
 }
 
 async function resolveTargetBranch(
-  repoInfo: RepoInfo | null,
   yes?: boolean,
 ): Promise<string | null> {
   const defaultBranch = await getDefaultBranch();
@@ -318,11 +317,8 @@ async function ensureBranchPushed(): Promise<boolean> {
   }
 }
 
-export async function maybeCreatePRAfterCommit(
-  options: PRFlowOptions,
-): Promise<PRFlowResult> {
+export async function createPR(options: PRFlowOptions): Promise<PRFlowResult> {
   const { yes } = options;
-  const config = await getConfig();
 
   const currentBranch = await getCurrentBranch();
   if (!currentBranch) {
@@ -332,6 +328,7 @@ export async function maybeCreatePRAfterCommit(
 
   const defaultBranch = await getDefaultBranch();
   if (currentBranch === defaultBranch) {
+    p.log.warn(`Cannot create PR from default branch (${defaultBranch})`);
     return "skipped";
   }
 
@@ -374,11 +371,27 @@ export async function maybeCreatePRAfterCommit(
     if (action === "browser") {
       return await handleBrowserPRCreation(currentBranch);
     }
-  } else if (!config.pr?.autoCreate) {
-    return "skipped";
   }
 
   return await handleAutoPRCreation(currentBranch, yes);
+}
+
+export async function maybeCreatePRAfterCommit(
+  options: PRFlowOptions,
+): Promise<PRFlowResult> {
+  const config = await getConfig();
+  const currentBranch = await getCurrentBranch();
+  const defaultBranch = await getDefaultBranch();
+
+  if (!currentBranch || currentBranch === defaultBranch) {
+    return "skipped";
+  }
+
+  if (options.yes && !config.pr?.autoCreate) {
+    return "skipped";
+  }
+
+  return createPR(options);
 }
 
 async function handleBrowserPRCreation(
@@ -424,9 +437,7 @@ async function handleAutoPRCreation(
 ): Promise<PRFlowResult> {
   const config = await getConfig();
 
-  const repoInfo = await getRepoInfo();
-
-  const targetBranch = await resolveTargetBranch(repoInfo, yes);
+  const targetBranch = await resolveTargetBranch(yes);
   if (!targetBranch) {
     return "abort";
   }
@@ -495,5 +506,5 @@ async function handleAutoPRCreation(
 }
 
 export async function runPRFlow(options: PRFlowOptions): Promise<PRFlowResult> {
-  return maybeCreatePRAfterCommit(options);
+  return createPR(options);
 }
