@@ -32,14 +32,8 @@ async function resolveBranchName(
   const s = p.spinner();
   s.start("Generating branch name");
 
-  let branchName: string;
-  try {
-    branchName = await generateBranchName({ diff });
-    s.stop("Branch name generated");
-  } catch (error: any) {
-    s.stop("Failed to generate branch name");
-    throw error;
-  }
+  let branchName = await generateBranchName({ diff });
+  s.stop("Branch name generated");
 
   branchName = normalizeBranchName(branchName);
 
@@ -85,13 +79,8 @@ async function resolveBranchName(
     const regenSpinner = p.spinner();
     regenSpinner.start("Regenerating branch name");
 
-    try {
-      branchName = await generateBranchName({ diff });
-      regenSpinner.stop("Branch name regenerated");
-    } catch (error: any) {
-      regenSpinner.stop("Failed to regenerate branch name");
-      throw error;
-    }
+    branchName = await generateBranchName({ diff });
+    regenSpinner.stop("Branch name regenerated");
 
     branchName = normalizeBranchName(branchName);
 
@@ -186,13 +175,13 @@ export async function maybeCreateBranchForCommit(
     return "continue";
   }
 
-  let branchName: string | null = null;
-  try {
-    branchName = await resolveBranchName(diff, yes);
-  } catch (error: any) {
-    p.cancel(error.message);
-    return "abort";
-  }
+   let branchName: string | null = null;
+   try {
+     branchName = await resolveBranchName(diff, yes);
+   } catch (error) {
+     p.cancel(error instanceof Error ? error.message : String(error));
+     return "abort";
+    }
   if (!branchName) return "abort";
 
   branchName = await ensureUniqueBranchName(branchName, yes);
@@ -204,9 +193,9 @@ export async function maybeCreateBranchForCommit(
   try {
     await createBranch(branchName);
     s.stop(`Switched to "${branchName}"`);
-  } catch (error: any) {
+  } catch (error) {
     s.stop("Failed to create branch");
-    p.cancel(error.message);
+    p.cancel(error instanceof Error ? error.message : String(error));
     return "abort";
   }
 

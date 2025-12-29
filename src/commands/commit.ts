@@ -11,6 +11,7 @@ import {
 import { generateCommitMessage, cleanup } from "../lib/opencode";
 import { maybeDeslopStagedChanges, getAndValidateStagedDiff } from "../lib/deslop";
 import { maybeCreateBranchForCommit } from "../lib/branch";
+import { maybeCreatePRAfterCommit } from "../lib/pr";
 
 export interface CommitOptions {
   message?: string;
@@ -18,13 +19,6 @@ export interface CommitOptions {
   yes?: boolean;
 }
 
-/**
- * Main commit command
- * - Views staged changes
- * - If none staged, offers to stage changes
- * - Generates AI commit message from diff
- * - Commits with the generated/provided message
- */
 export async function commitCommand(options: CommitOptions): Promise<void> {
   p.intro(color.bgCyan(color.black(" oc ")));
 
@@ -139,9 +133,9 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
     try {
       commitMessage = await generateCommitMessage({ diff });
       s.stop("Commit message generated");
-    } catch (error: any) {
+    } catch (error) {
       s.stop("Failed to generate commit message");
-      p.cancel(error.message);
+      p.cancel(error instanceof Error ? error.message : String(error));
       cleanup();
       process.exit(1);
     }
@@ -195,9 +189,9 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
       try {
         commitMessage = await generateCommitMessage({ diff });
         s.stop("Commit message regenerated");
-      } catch (error: any) {
+      } catch (error) {
         s.stop("Failed to regenerate commit message");
-        p.cancel(error.message);
+        p.cancel(error instanceof Error ? error.message : String(error));
         cleanup();
         process.exit(1);
       }
@@ -224,15 +218,19 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
   try {
     const result = await commit(commitMessage!);
     s.stop(`Committed successfully!\n${color.dim(result)}`);
-    p.outro(color.green("Done!"));
-    cleanup();
-    process.exit(0);
-  } catch (error: any) {
+  } catch (error) {
     s.stop("Commit failed");
-    p.cancel(error.message);
+    p.cancel(error instanceof Error ? error.message : String(error));
     cleanup();
     process.exit(1);
   }
+
+  // Offer to create PR after successful commit
+  await maybeCreatePRAfterCommit({ yes: options.yes });
+
+  p.outro(color.green("Done!"));
+  cleanup();
+  process.exit(0);
 }
 
 function hasChanges(status: GitStatus): boolean {
