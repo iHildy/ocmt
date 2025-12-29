@@ -86,10 +86,11 @@ export async function maybeDeslopStagedChanges(
   if (options.yes) {
     shouldDeslop = autoDeslop;
   } else {
-    // Combined prompt: user can answer y/n or type instructions directly
     const response = await p.text({
       message: `Deslop staged changes? ${color.dim("(y/n, or type instructions)")}`,
-      placeholder: autoDeslop ? "Yes (press Enter) or type instructions" : "No (press Enter) or type y/instructions",
+      placeholder: autoDeslop
+        ? "Yes (press Enter) or type instructions"
+        : "No (press Enter) or type y/instructions",
       initialValue: "",
     });
 
@@ -100,13 +101,10 @@ export async function maybeDeslopStagedChanges(
     const input = (response ?? "").trim().toLowerCase();
 
     if (input === "" || input === "y" || input === "yes") {
-      // Empty or explicit yes - deslop with no extra instructions
       shouldDeslop = input !== "" || autoDeslop;
     } else if (input === "n" || input === "no") {
-      // Explicit no - skip deslop
       shouldDeslop = false;
     } else {
-      // Any other input is treated as extra instructions
       shouldDeslop = true;
       extraPrompt = response?.trim();
     }
@@ -210,9 +208,7 @@ export async function maybeDeslopStagedChanges(
     if (snapshotRef) {
       try {
         await restoreGitSnapshot(snapshotRef);
-      } catch {
-        // Ignore cleanup errors
-      }
+      } catch {}
     }
     p.cancel(error.message);
     return "abort";
@@ -220,9 +216,7 @@ export async function maybeDeslopStagedChanges(
     if (deslopSession) {
       try {
         await deslopSession.close();
-      } catch {
-        // Ignore cleanup errors
-      }
+      } catch {}
     }
   }
 }
