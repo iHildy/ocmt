@@ -136,7 +136,6 @@ export async function maybeDeslopStagedChanges(
 
   let deslopSession: Awaited<ReturnType<typeof runDeslopEdits>> | null = null;
   let snapshotRef: string | null = null;
-  const fallbackSummary = "Deslop completed with minor cleanup adjustments.";
   let summary: string | null = null;
 
   try {
@@ -167,7 +166,7 @@ export async function maybeDeslopStagedChanges(
     s.stop("Deslop applied (review pending)");
 
     if (options.yes) {
-      p.log.step(summary || fallbackSummary);
+      if (summary) p.log.step(summary);
       return "updated";
     }
 
@@ -201,16 +200,15 @@ export async function maybeDeslopStagedChanges(
       return "continue";
     }
 
-    p.log.step(summary || fallbackSummary);
+    if (summary) p.log.step(summary);
     return "updated";
-  } catch (error: any) {
-    s.stop("Deslop failed");
+  } catch (error) {
     if (snapshotRef) {
       try {
         await restoreGitSnapshot(snapshotRef);
       } catch {}
     }
-    p.cancel(error.message);
+    p.cancel(error instanceof Error ? error.message : String(error));
     return "abort";
   } finally {
     if (deslopSession) {

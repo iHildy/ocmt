@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { commitCommand } from "./commands/commit";
 import { changelogCommand } from "./commands/changelog";
 import { releaseCommand } from "./commands/release";
+import { prCommand } from "./commands/pr";
 
 const program = new Command();
 
@@ -12,7 +13,6 @@ program
   .description("AI-powered git commit message generator using opencode.ai")
   .version("1.0.0");
 
-// Default command (no subcommand) - runs commit flow
 program
   .argument("[message]", "Optional commit message to use directly")
   .option("-a, --all", "Stage all changes before committing")
@@ -21,7 +21,6 @@ program
     await commitCommand({ message, ...options });
   });
 
-// Changelog command
 program
   .command("changelog")
   .alias("cl")
@@ -32,7 +31,6 @@ program
     await changelogCommand(options);
   });
 
-// Release command - generate changelog and commit it
 program
   .command("release")
   .alias("rel")
@@ -44,6 +42,14 @@ program
   .option("-y, --yes", "Skip confirmation prompts")
   .action(async (options) => {
     await releaseCommand(options);
+  });
+
+program
+  .command("pr")
+  .description("Create a pull request for the current branch")
+  .option("-y, --yes", "Skip confirmation prompts")
+  .action(async (options) => {
+    await prCommand(options);
   });
 
 // Also support --changelog / -cl as flags on the main command

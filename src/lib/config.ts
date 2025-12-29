@@ -1,9 +1,4 @@
-/**
- * Configuration file management for oc
- *
- * Manages global ~/.oc and project-level .oc config directories.
- * Project config overrides global config.
- */
+
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
@@ -18,17 +13,10 @@ const JSON_CONFIG_FILE = "config.json";
 // Global config directory in user's home
 const GLOBAL_CONFIG_DIR = join(homedir(), ".oc");
 
-/**
- * Check if a value is a plain object (for deep merge)
- */
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Merge two config objects with override taking precedence.
- * Performs shallow merge on nested objects (one level deep).
- */
 function mergeConfigs(base: OcConfig, override: Partial<OcConfig>): OcConfig {
   const result = { ...base };
 
@@ -49,9 +37,6 @@ function mergeConfigs(base: OcConfig, override: Partial<OcConfig>): OcConfig {
   return result;
 }
 
-/**
- * Ensure the global ~/.oc config directory exists
- */
 function ensureGlobalConfigDir(): string {
   if (!existsSync(GLOBAL_CONFIG_DIR)) {
     mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
@@ -59,9 +44,6 @@ function ensureGlobalConfigDir(): string {
   return GLOBAL_CONFIG_DIR;
 }
 
-/**
- * JSON config structure
- */
 export interface OcConfig {
   commit?: {
     autoAccept?: boolean;
@@ -83,6 +65,11 @@ export interface OcConfig {
     autoTag?: boolean;
     autoPush?: boolean;
     tagPrefix?: string;
+  };
+  pr?: {
+    autoCreate?: boolean;
+    autoOpenInBrowser?: boolean;
+    model?: string; // format: "provider/model"
   };
   general?: {
     confirmPrompts?: boolean;
@@ -111,6 +98,11 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
     autoTag: false,
     autoPush: false,
     tagPrefix: "v",
+  },
+  pr: {
+    autoCreate: false,
+    autoOpenInBrowser: false,
+    model: "opencode/gpt-5-nano",
   },
   general: {
     confirmPrompts: true,
@@ -194,19 +186,58 @@ Use the "Keep a Changelog" format (https://keepachangelog.com/).
 7. Only return the changelog content, no explanations
 `;
 
-/**
- * Get the git repository root directory
- */
+const DEFAULT_PR_CONFIG = `# Pull Request Generation Guidelines
+
+Generate a pull request title and description from the provided diff and commits.
+
+## Format
+
+Return the response in the following format:
+
+TITLE: <concise PR title>
+
+BODY:
+<PR description in markdown>
+
+## Title Rules
+
+1. Use imperative mood ("Add feature" not "Added feature")
+2. Keep under 72 characters
+3. Be specific but concise
+4. No period at the end
+
+## Body Structure
+
+\`\`\`markdown
+## Summary
+
+Brief description of what this PR does.
+
+## Changes
+
+- Bullet points of key changes
+
+## Testing
+
+How to test the changes (if applicable)
+\`\`\`
+
+## Body Rules
+
+1. Start with a clear summary
+2. List the main changes as bullet points
+3. Be informative but concise
+4. Use markdown formatting
+5. Only return the title and body, no additional explanations
+`;
+
+const PR_CONFIG_FILE = "pr.md";
+
 async function getRepoRoot(): Promise<string> {
   const root = await git("rev-parse --show-toplevel");
   return root;
 }
 
-/**
- * Get a text config file with layered loading:
- * 1. Use project .oc/<fileName> if exists
- * 2. Otherwise use global ~/.oc/<fileName> (created if doesn't exist)
- */
 async function getLayeredTextConfig(
   fileName: string,
   defaultContent: string,
@@ -234,27 +265,18 @@ async function getLayeredTextConfig(
   return readFileSync(globalPath, "utf-8");
 }
 
-/**
- * Get the commit config with layered loading:
- * 1. Use project .oc/config.md if exists
- * 2. Otherwise use global ~/.oc/config.md (created if doesn't exist)
- */
 export async function getCommitConfig(): Promise<string> {
   return getLayeredTextConfig(COMMIT_CONFIG_FILE, DEFAULT_COMMIT_CONFIG);
 }
 
-/**
- * Get the changelog config with layered loading:
- * 1. Use project .oc/changelog.md if exists
- * 2. Otherwise use global ~/.oc/changelog.md (created if doesn't exist)
- */
 export async function getChangelogConfig(): Promise<string> {
   return getLayeredTextConfig(CHANGELOG_CONFIG_FILE, DEFAULT_CHANGELOG_CONFIG);
 }
 
-/**
- * Check if config files exist
- */
+export async function getPRConfig(): Promise<string> {
+  return getLayeredTextConfig(PR_CONFIG_FILE, DEFAULT_PR_CONFIG);
+}
+
 export async function configExists(): Promise<boolean> {
   try {
     const repoRoot = await getRepoRoot();
@@ -265,12 +287,6 @@ export async function configExists(): Promise<boolean> {
   }
 }
 
-/**
- * Get the JSON config with layered loading:
- * 1. Start with defaults
- * 2. Merge global ~/.oc/config.json (created if doesn't exist)
- * 3. Merge project .oc/config.json (if exists, not created)
- */
 export async function getConfig(): Promise<OcConfig> {
   // Start with defaults
   let config: OcConfig = { ...DEFAULT_JSON_CONFIG };

@@ -1,8 +1,4 @@
-/**
- * OpenCode AI client for generating commit messages and changelogs
- *
- * Integrates with opencode.ai SDK for AI inference
- */
+
 
 import * as p from "@clack/prompts";
 import color from "picocolors";
@@ -13,7 +9,12 @@ import {
 } from "@opencode-ai/sdk";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { getCommitConfig, getChangelogConfig, getConfig } from "./config";
+import {
+  getCommitConfig,
+  getChangelogConfig,
+  getPRConfig,
+  getConfig,
+} from "./config";
 
 const execAsync = promisify(exec);
 
@@ -26,15 +27,11 @@ interface ModelConfig {
   modelID: string;
 }
 
-/**
- * Parse a model string in "provider/model" format
- * Falls back to "opencode" provider if no slash is present
- */
 function parseModelString(modelStr: string): ModelConfig {
   const trimmedInput = modelStr.trim();
   if (!trimmedInput) {
     throw new Error(
-      "Invalid model string: expected 'provider/model' with non-empty parts"
+      "Invalid model string: expected 'provider/model' with non-empty parts",
     );
   }
 
@@ -45,7 +42,7 @@ function parseModelString(modelStr: string): ModelConfig {
 
     if (!providerID || !modelID) {
       throw new Error(
-        "Invalid model string: expected 'provider/model' with non-empty parts"
+        "Invalid model string: expected 'provider/model' with non-empty parts",
       );
     }
 
@@ -59,39 +56,36 @@ function formatModelID(model: ModelConfig): string {
   return `${model.providerID}/${model.modelID}`;
 }
 
-/**
- * Get the model config for commit generation from user config
- */
 async function getCommitModel(): Promise<ModelConfig> {
   const config = await getConfig();
   const modelStr = config.commit?.model || DEFAULT_COMMIT_MODEL;
   return parseModelString(modelStr);
 }
 
-/**
- * Get the model config for branch name generation from user config
- */
 async function getBranchModel(): Promise<ModelConfig> {
   const config = await getConfig();
-  const modelStr = config.commit?.branchModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
+  const modelStr =
+    config.commit?.branchModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
   return parseModelString(modelStr);
 }
 
-/**
- * Get the model config for deslop generation from user config
- */
 async function getDeslopModel(): Promise<ModelConfig> {
   const config = await getConfig();
-  const modelStr = config.commit?.deslopModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
+  const modelStr =
+    config.commit?.deslopModel || config.commit?.model || DEFAULT_COMMIT_MODEL;
   return parseModelString(modelStr);
 }
 
-/**
- * Get the model config for changelog generation from user config
- */
 async function getChangelogModel(): Promise<ModelConfig> {
   const config = await getConfig();
   const modelStr = config.changelog?.model || DEFAULT_CHANGELOG_MODEL;
+  return parseModelString(modelStr);
+}
+
+async function getPRModel(): Promise<ModelConfig> {
+  const config = await getConfig();
+  const modelStr =
+    config.pr?.model || config.commit?.model || DEFAULT_COMMIT_MODEL;
   return parseModelString(modelStr);
 }
 
@@ -134,15 +128,24 @@ export interface ChangelogGenerationOptions {
   version?: string | null;
 }
 
+export interface PRGenerationOptions {
+  diff: string;
+  commits: Array<{ hash: string; message: string }>;
+  targetBranch: string;
+  sourceBranch: string;
+}
+
+export interface PRContent {
+  title: string;
+  body: string;
+}
+
 export interface UpdateChangelogOptions {
   newChangelog: string;
   existingChangelog: string;
   changelogPath: string;
 }
 
-/**
- * Check if opencode CLI is installed
- */
 async function isOpencodeInstalled(): Promise<boolean> {
   try {
     await execAsync("which opencode");
@@ -152,9 +155,6 @@ async function isOpencodeInstalled(): Promise<boolean> {
   }
 }
 
-/**
- * Check if user is authenticated with opencode
- */
 async function checkAuth(client: OpencodeClient): Promise<boolean> {
   try {
     const config = await client.config.get();
@@ -164,16 +164,13 @@ async function checkAuth(client: OpencodeClient): Promise<boolean> {
   }
 }
 
-/**
- * Get or create the OpenCode client
- * Tries to connect to existing server first, spawns new one if needed
- */
 async function getClient(): Promise<OpencodeClient> {
   if (clientInstance) {
     return clientInstance;
   }
 
-  const envBaseUrl = process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
+  const envBaseUrl =
+    process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_URL;
   if (envBaseUrl?.trim()) {
     try {
       const client = createOpencodeClient({
@@ -184,7 +181,7 @@ async function getClient(): Promise<OpencodeClient> {
       return client;
     } catch {
       p.log.warn(
-        `Failed to connect to OpenCode server at ${envBaseUrl}. Falling back to local server.`
+        `Failed to connect to OpenCode server at ${envBaseUrl}. Falling back to local server.`,
       );
     }
   }
@@ -206,7 +203,7 @@ async function getClient(): Promise<OpencodeClient> {
   if (!(await isOpencodeInstalled())) {
     p.log.error("OpenCode CLI is not installed");
     p.log.info(
-      `Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`
+      `Install it with: ${color.cyan("npm install -g opencode")} or ${color.cyan("brew install sst/tap/opencode")}`,
     );
     process.exit(1);
   }
@@ -241,18 +238,21 @@ async function getClient(): Promise<OpencodeClient> {
     });
 
     return opencode.client;
-  } catch (error: any) {
-    p.log.error(`Failed to start OpenCode server: ${error.message}`);
+  } catch (error) {
+    p.log.error(`Failed to start OpenCode server: ${error instanceof Error ? error.message : String(error)}`);
     p.log.info(`Make sure OpenCode is installed and configured correctly`);
     process.exit(1);
   }
 }
 
-/**
- * Extract text content from AI response parts
- */
-function extractTextFromParts(parts: any[]): string {
+
+
+function extractTextFromParts(parts: unknown[]): string {
   const textParts = parts
+    .filter(
+      (part): part is { type: string; text: string } =>
+        typeof part === "object" && part !== null && "type" in part && "text" in part,
+    )
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
@@ -262,12 +262,198 @@ function extractTextFromParts(parts: any[]): string {
 
 function extractDeslopSummary(text: string): string | null {
   const summaryMatch = text.match(/SUMMARY:\s*([\s\S]*)$/i);
-  if (summaryMatch) {
-    return summaryMatch[1].trim();
+  return summaryMatch ? summaryMatch[1].trim() : null;
+}
+
+const MESSAGE_POLL_INTERVAL_MS = 250;
+const MESSAGE_POLL_TIMEOUT_MS = 60000;
+
+type SessionMessageEntry = {
+  info?: {
+    id?: string;
+    role?: string;
+    error?: unknown;
+  };
+  parts?: unknown[];
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAssistantText(
+  client: OpencodeClient,
+  sessionID: string,
+  modelID: string,
+  directory?: string,
+): Promise<{ text: string; messageID: string } | null> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < MESSAGE_POLL_TIMEOUT_MS) {
+    const messagesResult = await client.session.messages({
+      path: { id: sessionID },
+      query: directory ? { directory, limit: 20 } : { limit: 20 },
+    });
+
+    if ("error" in messagesResult && messagesResult.error) {
+      throw new Error(
+        `Failed to fetch session messages (${modelID}): ${JSON.stringify(messagesResult.error)}`,
+      );
+    }
+
+    const messages = (messagesResult as { data?: SessionMessageEntry[] }).data;
+    if (messages && messages.length > 0) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const entry = messages[i];
+        if (!entry?.info || entry.info.role !== "assistant") {
+          continue;
+        }
+
+        if (entry.info.error) {
+          throw new Error(
+            `Model response error (${modelID}): ${JSON.stringify(entry.info.error)}`,
+          );
+        }
+
+        const text = extractTextFromParts(entry.parts || []);
+        if (text) {
+          return { text, messageID: entry.info.id || "unknown" };
+        }
+      }
+    }
+
+    await sleep(MESSAGE_POLL_INTERVAL_MS);
   }
 
-  const trimmed = text.trim();
-  return trimmed ? trimmed : null;
+  return null;
+}
+
+type EventListenerHandle = {
+  promise: Promise<{ text: string; messageID: string } | null>;
+  abort: () => void;
+};
+
+function createEventListener(
+  client: OpencodeClient,
+  sessionID: string,
+  modelID: string,
+  directory?: string,
+): EventListenerHandle {
+  const controller = new AbortController();
+  return {
+    promise: waitForAssistantTextFromEvents(
+      client,
+      sessionID,
+      modelID,
+      controller,
+      directory,
+    ),
+    abort: () => controller.abort(),
+  };
+}
+
+async function waitForAssistantTextFromEvents(
+  client: OpencodeClient,
+  sessionID: string,
+  modelID: string,
+  controller: AbortController,
+  directory?: string,
+): Promise<{ text: string; messageID: string } | null> {
+  const timeout = setTimeout(() => controller.abort(), MESSAGE_POLL_TIMEOUT_MS);
+  const textParts = new Map<string, string>();
+  let messageID: string | null = null;
+
+  try {
+    const streamResult = await client.event.subscribe({
+      ...(directory ? { query: { directory } } : {}),
+      signal: controller.signal,
+    });
+
+    for await (const event of streamResult.stream) {
+      if (!event || typeof event !== "object" || !("type" in event)) {
+        continue;
+      }
+
+      const typedEvent = event as {
+        type: string;
+        properties?: {
+          sessionID?: string;
+          messageID?: string;
+          delta?: string;
+          part?: { id?: string; type?: string; text?: string; sessionID?: string; messageID?: string };
+          info?: { sessionID?: string; role?: string; error?: unknown; time?: { completed?: number } };
+          permission?: { id?: string; sessionID?: string };
+        };
+      };
+
+      if (typedEvent.type === "permission.updated") {
+        const permission = typedEvent.properties as { id?: string; sessionID?: string } | undefined;
+        if (permission?.sessionID === sessionID && permission.id) {
+          try {
+            await client.postSessionIdPermissionsPermissionId({
+              path: { id: sessionID, permissionID: permission.id },
+              ...(directory ? { query: { directory } } : {}),
+              body: { response: "once" },
+            });
+          } catch {
+            // Ignore permission response errors; the model may fail without it.
+          }
+        }
+      }
+
+      if (typedEvent.type === "message.updated") {
+        const info = typedEvent.properties?.info;
+        if (info?.sessionID === sessionID && info.role === "assistant") {
+          if (info.error) {
+            throw new Error(
+              `Model response error (${modelID}): ${JSON.stringify(info.error)}`,
+            );
+          }
+          if (info.time?.completed) {
+            break;
+          }
+        }
+      }
+
+      if (typedEvent.type === "message.part.updated") {
+        const part = typedEvent.properties?.part;
+        if (part?.sessionID !== sessionID || part.type !== "text") {
+          continue;
+        }
+
+        const partID = part.id || "text";
+        const existing = textParts.get(partID) || "";
+        const delta =
+          typeof typedEvent.properties?.delta === "string"
+            ? typedEvent.properties.delta
+            : "";
+        const nextText = delta ? existing + delta : part.text || existing;
+        textParts.set(partID, nextText);
+        messageID = part.messageID || messageID;
+      }
+
+      if (typedEvent.type === "session.idle") {
+        const properties = typedEvent.properties as { sessionID?: string } | undefined;
+        if (properties?.sessionID === sessionID) {
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Error && error.name === "AbortError")) {
+      throw error;
+    }
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
+
+  const combined = Array.from(textParts.values()).join("").trim();
+  if (!combined) {
+    return null;
+  }
+
+  return { text: combined, messageID: messageID ?? "unknown" };
 }
 
 interface OpencodePromptOptions {
@@ -287,7 +473,7 @@ interface OpencodePromptResult {
 }
 
 async function runOpencodePrompt(
-  options: OpencodePromptOptions
+  options: OpencodePromptOptions,
 ): Promise<OpencodePromptResult> {
   const { title, prompt, model, agent, tools, directory } = options;
   const client = await getClient();
@@ -314,6 +500,10 @@ async function runOpencodePrompt(
     }
   };
 
+  const eventListener = directory
+    ? createEventListener(client, session.data.id, modelID, directory)
+    : null;
+
   let result;
   try {
     result = await client.session.prompt({
@@ -326,25 +516,85 @@ async function runOpencodePrompt(
         ...(tools ? { tools } : {}),
       },
     });
-  } catch (err: any) {
+  } catch (err) {
+    eventListener?.abort();
     await close();
-    throw new Error(`Model request failed (${modelID}): ${err.message}`);
+    throw new Error(`Model request failed (${modelID}): ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  if (!result.data) {
+  if ("error" in result && result.error) {
+    eventListener?.abort();
+    await close();
+    throw new Error(
+      `Model request failed (${modelID}): ${JSON.stringify(result.error)}`,
+    );
+  }
+
+  if (!("data" in result) || !result.data) {
+    eventListener?.abort();
     await close();
     throw new Error(`Failed to get AI response from ${modelID}`);
+  }
+
+  const responseInfo = (result.data as { info?: { error?: unknown } })?.info;
+  if (responseInfo?.error) {
+    eventListener?.abort();
+    await close();
+    throw new Error(
+      `Model response error (${modelID}): ${JSON.stringify(responseInfo.error)}`,
+    );
   }
 
   const message = extractTextFromParts(result.data.parts || []);
 
   if (!message) {
+    try {
+      const eventFallback = eventListener
+        ? await eventListener.promise
+        : await waitForAssistantTextFromEvents(
+            client,
+            session.data.id,
+            modelID,
+            new AbortController(),
+            directory,
+          );
+      if (eventFallback) {
+        return {
+          message: eventFallback.text,
+          sessionID: session.data.id,
+          messageID: eventFallback.messageID,
+          close,
+        };
+      }
+
+      const fallback = await waitForAssistantText(
+        client,
+        session.data.id,
+        modelID,
+        directory,
+      );
+      if (fallback) {
+        return {
+          message: fallback.text,
+          sessionID: session.data.id,
+          messageID: fallback.messageID,
+          close,
+        };
+      }
+    } catch (error) {
+      eventListener?.abort();
+      await close();
+      throw error;
+    }
+
+    eventListener?.abort();
     await close();
     throw new Error(
-      `No response generated by ${modelID}. Response: ${JSON.stringify(result.data)}`
+      `No response generated by ${modelID}. Response: ${JSON.stringify(result.data)} (status ${result.response?.status ?? "unknown"})`,
     );
   }
 
+  eventListener?.abort();
   return {
     message,
     sessionID: session.data.id,
@@ -373,15 +623,24 @@ function buildDeslopPrompt(options: DeslopGenerationOptions): string {
 
   let prompt = `# Remove AI code slop
 
-Edit files directly using the available tools. Do not output a patch. Apply changes in place.
+Edit files directly using the available tools.
 
 Rules:
-- Only edit files listed under "Staged files" (if provided)
+- Only edit files listed under "Staged files" (if provided, including new files)
 - Do not edit files listed under "Not staged files" (if provided)
 - Do not edit any file that is not staged
 - Do not create new files
-- Remove AI-generated slop (unnecessary comments, excessive defensive code, inconsistent style)
 - Keep changes minimal and consistent with the codebase
+- Thoroughly examine the full content of ALL staged files (not just the diff summary) and identify/remove AI slop from each one individually, including new files. Use file reading tools to inspect complete file contents before making edits.
+
+Instructions:
+Check the uncommited changes, and remove all AI generated slop introduced in this branch.
+This includes:
+- Extra comments that a human wouldn't add or is inconsistent with the rest of the file
+- Remove all verbose JSDoc comments that explain obvious function purposes.
+- Extra defensive checks or try/catch blocks that are abnormal for that area of the codebase (especially if called by trusted / validated codepaths)
+- Casts to any to get around type issues
+- Any other style that is inconsistent with the file
 
 Respond with:
 SUMMARY: <1-3 sentences>
@@ -407,7 +666,7 @@ SUMMARY: No changes required.
 }
 
 export async function runDeslopEdits(
-  options: DeslopGenerationOptions
+  options: DeslopGenerationOptions,
 ): Promise<DeslopEditResult> {
   const deslopModel = await getDeslopModel();
   const prompt = buildDeslopPrompt(options);
@@ -427,13 +686,11 @@ export async function runDeslopEdits(
     close,
   };
 }
-/**
- * Run a prompt using the commit model
- */
+
 async function runCommitPrompt(
   title: string,
   prompt: string,
-  modelOverride?: ModelConfig
+  modelOverride?: ModelConfig,
 ): Promise<string> {
   const commitModel = modelOverride ?? (await getCommitModel());
   const { message, close } = await runOpencodePrompt({
@@ -449,11 +706,8 @@ async function runCommitPrompt(
     .trim();
 }
 
-/**
- * Generate a commit message from a git diff using OpenCode AI
- */
 export async function generateCommitMessage(
-  options: CommitGenerationOptions
+  options: CommitGenerationOptions,
 ): Promise<string> {
   const { diff, context } = options;
 
@@ -469,11 +723,8 @@ export async function generateCommitMessage(
   return runCommitPrompt("oc-commit", prompt);
 }
 
-/**
- * Generate a branch name from a git diff using OpenCode AI
- */
 export async function generateBranchName(
-  options: BranchGenerationOptions
+  options: BranchGenerationOptions,
 ): Promise<string> {
   const { diff, context } = options;
 
@@ -489,12 +740,57 @@ export async function generateBranchName(
   return runCommitPrompt("oc-branch", prompt, branchModel);
 }
 
+function parsePRContent(response: string): PRContent {
+  const titleMatch = response.match(/TITLE:\s*(.+?)(?:\n|$)/i);
+  const bodyMatch = response.match(/BODY:\s*([\s\S]+)$/i);
 
-/**
- * Generate a changelog from commits using OpenCode AI
- */
+  const title = titleMatch?.[1]?.trim() || "Update";
+  let body = bodyMatch?.[1]?.trim() || response.trim();
+
+  // Clean up markdown code blocks if present
+  body = body
+    .replace(/^```markdown\n?/i, "")
+    .replace(/^```\n?/, "")
+    .replace(/\n?```$/, "")
+    .trim();
+
+  return { title, body };
+}
+
+export async function generatePRContent(
+  options: PRGenerationOptions,
+): Promise<PRContent> {
+  const { diff, commits, targetBranch, sourceBranch } = options;
+
+  const systemPrompt = await getPRConfig();
+  const prModel = await getPRModel();
+
+  // Build commits list
+  const commitsList = commits
+    .map((c) => `- ${c.hash}: ${c.message}`)
+    .join("\n");
+
+  // Build the prompt
+  let prompt = `${systemPrompt}\n\n---\n\nGenerate a pull request title and description for merging "${sourceBranch}" into "${targetBranch}".\n\n`;
+
+  if (commits.length > 0) {
+    prompt += `## Commits\n\n${commitsList}\n\n`;
+  }
+
+  prompt += `## Diff\n\n\`\`\`diff\n${diff}\n\`\`\``;
+
+  const { message, close } = await runOpencodePrompt({
+    title: "oc-pr",
+    prompt,
+    model: prModel,
+  });
+  await close();
+
+  return parsePRContent(message);
+}
+
 export async function generateChangelog(
-  options: ChangelogGenerationOptions
+  options: ChangelogGenerationOptions,
 ): Promise<string> {
   const { commits, fromRef, toRef, version } = options;
   const systemPrompt = await getChangelogConfig();
@@ -526,12 +822,8 @@ export async function generateChangelog(
   return message.trim();
 }
 
-/**
- * Update an existing CHANGELOG.md file intelligently using AI
- * The AI will merge the new changelog content with existing content properly
- */
 export async function updateChangelogFile(
-  options: UpdateChangelogOptions
+  options: UpdateChangelogOptions,
 ): Promise<string> {
   const { newChangelog, existingChangelog, changelogPath } = options;
   const changelogModel = await getChangelogModel();
@@ -578,9 +870,6 @@ Return the complete updated CHANGELOG.md content:`;
   return updatedChangelog;
 }
 
-/**
- * Cleanup function to close the server if we spawned one
- */
 export function cleanup(): void {
   serverInstance?.close();
   serverInstance = null;

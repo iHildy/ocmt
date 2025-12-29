@@ -9,21 +9,15 @@ export interface GitStatus {
   untracked: string[];
 }
 
-/**
- * Execute a git command and return the output
- */
 export async function git(args: string, options?: { preserveWhitespace?: boolean }): Promise<string> {
   try {
     const { stdout } = await execAsync(`git ${args}`);
     return options?.preserveWhitespace ? stdout : stdout.trim();
-  } catch (error: any) {
-    throw new Error(`Git command failed: ${error.message}`);
+  } catch (error) {
+    throw new Error(`Git command failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-/**
- * Check if current directory is a git repository
- */
 export async function isGitRepo(): Promise<boolean> {
   try {
     await git("rev-parse --is-inside-work-tree");
@@ -33,11 +27,7 @@ export async function isGitRepo(): Promise<boolean> {
   }
 }
 
-/**
- * Get the current git status
- */
 export async function getStatus(): Promise<GitStatus> {
-  // Preserve whitespace - leading spaces indicate index status
   const output = await git("status --porcelain", { preserveWhitespace: true });
   const lines = output.split("\n").filter((line) => line.length > 0);
 
@@ -64,46 +54,28 @@ export async function getStatus(): Promise<GitStatus> {
   return { staged, unstaged, untracked };
 }
 
-/**
- * Get staged diff
- */
 export async function getStagedDiff(): Promise<string> {
   return git("diff --cached");
 }
 
-/**
- * Get unstaged diff
- */
 export async function getUnstagedDiff(): Promise<string> {
   return git("diff");
 }
 
-/**
- * Stage all changes
- */
 export async function stageAll(): Promise<void> {
   await git("add -A");
 }
 
-/**
- * Stage specific files
- */
 export async function stageFiles(files: string[]): Promise<void> {
   if (files.length === 0) return;
   const escaped = files.map((f) => `"${f}"`).join(" ");
   await git(`add ${escaped}`);
 }
 
-/**
- * Create a commit with the given message
- */
 export async function commit(message: string): Promise<string> {
   return git(`commit -m "${message.replace(/"/g, '\\"')}"`);
 }
 
-/**
- * Get the current branch name
- */
 export async function getCurrentBranch(): Promise<string | null> {
   try {
     const branch = await git("rev-parse --abbrev-ref HEAD");
@@ -113,9 +85,6 @@ export async function getCurrentBranch(): Promise<string | null> {
   }
 }
 
-/**
- * Check if a local branch exists
- */
 export async function branchExists(branch: string): Promise<boolean> {
   try {
     await git(`show-ref --verify --quiet refs/heads/${branch}`);
@@ -125,9 +94,6 @@ export async function branchExists(branch: string): Promise<boolean> {
   }
 }
 
-/**
- * Get the default branch name
- */
 export async function getDefaultBranch(): Promise<string | null> {
   try {
     const ref = await git("symbolic-ref refs/remotes/origin/HEAD");
@@ -140,17 +106,11 @@ export async function getDefaultBranch(): Promise<string | null> {
   }
 }
 
-/**
- * Create and switch to a new branch
- */
 export async function createBranch(name: string): Promise<void> {
   const safeName = name.replace(/"/g, '\\"');
   await git(`checkout -b "${safeName}"`);
 }
 
-/**
- * Get commit log
- */
 export async function getLog(
   options: { from?: string; to?: string; limit?: number } = {}
 ): Promise<string> {
@@ -168,9 +128,6 @@ export async function getLog(
   return git(cmd);
 }
 
-/**
- * Get list of tags
- */
 export async function getTags(): Promise<string[]> {
   try {
     const output = await git("tag --sort=-creatordate");
@@ -180,25 +137,15 @@ export async function getTags(): Promise<string[]> {
   }
 }
 
-/**
- * Get list of releases from git tags
- */
 export async function getReleases(): Promise<string[]> {
   const tags = await getTags();
-  // Filter to only version-like tags (v1.0.0, 1.0.0, etc.)
   return tags.filter((tag) => /^v?\d+\.\d+\.\d+/.test(tag));
 }
 
-/**
- * Get the diff between two refs
- */
 export async function getDiffBetween(from: string, to: string): Promise<string> {
   return git(`diff ${from}..${to}`);
 }
 
-/**
- * Get commits between two refs
- */
 export async function getCommitsBetween(
   from: string,
   to: string
@@ -218,15 +165,11 @@ export interface VersionBump {
   file: string;
 }
 
-/**
- * Detect version bumps in package.json between two refs
- */
 export async function detectVersionBump(
   from: string,
   to: string
 ): Promise<VersionBump | null> {
   try {
-    // Check if package.json was modified (exact match for root package.json only)
     const changedFiles = await git(`diff --name-only ${from}..${to}`);
     const changedFilesList = changedFiles.split("\n").map(f => f.trim()).filter(Boolean);
     
@@ -234,27 +177,22 @@ export async function detectVersionBump(
       return null;
     }
 
-    // Get old version
     let oldVersion: string | null = null;
     try {
       const oldPackageJson = await git(`show ${from}:package.json`);
       const oldPkg = JSON.parse(oldPackageJson);
       oldVersion = oldPkg.version || null;
     } catch {
-      // File might not exist in old ref
     }
 
-    // Get new version
     let newVersion: string | null = null;
     try {
       const newPackageJson = await git(`show ${to}:package.json`);
       const newPkg = JSON.parse(newPackageJson);
       newVersion = newPkg.version || null;
     } catch {
-      // File might not exist in new ref
     }
 
-    // Only return if version actually changed
     if (oldVersion !== newVersion && newVersion) {
       return {
         oldVersion,
@@ -269,9 +207,6 @@ export async function detectVersionBump(
   }
 }
 
-/**
- * Get the current version from package.json in the working directory
- */
 export async function getCurrentVersion(): Promise<string | null> {
   try {
     const repoRoot = await git("rev-parse --show-toplevel");
@@ -288,5 +223,93 @@ export async function getCurrentVersion(): Promise<string | null> {
     return packageJson.version || null;
   } catch {
     return null;
+  }
+}
+
+export async function hasUpstreamBranch(): Promise<boolean> {
+  try {
+    await git("rev-parse --abbrev-ref @{upstream}");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function pushBranch(): Promise<string> {
+  const branch = await getCurrentBranch();
+  if (!branch) {
+    throw new Error("Not on a branch");
+  }
+  return git(`push -u origin ${branch}`);
+}
+
+export async function getRemoteUrl(): Promise<string | null> {
+  try {
+    const url = await git("remote get-url origin");
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getRemoteBranches(): Promise<string[]> {
+  try {
+    const output = await git('branch -r --format="%(refname:short)"');
+    return output
+      .split("\n")
+      .filter(Boolean)
+      .map((b) => b.replace(/^origin\//, ""))
+      .filter((b) => b !== "HEAD");
+  } catch {
+    return [];
+  }
+}
+
+export async function getLocalBranches(): Promise<string[]> {
+  try {
+    const output = await git("branch --format='%(refname:short)'");
+    return output.split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function parseRepoFromUrl(url: string): { owner: string; repo: string } | null {
+  const sshMatch = url.match(/git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return { owner: sshMatch[1], repo: sshMatch[2] };
+  }
+
+  const httpsMatch = url.match(/https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (httpsMatch) {
+    return { owner: httpsMatch[1], repo: httpsMatch[2] };
+  }
+
+  return null;
+}
+
+export async function getDiffFromBranch(targetBranch: string): Promise<string> {
+  try {
+    const mergeBase = await git(`merge-base ${targetBranch} HEAD`);
+    return git(`diff ${mergeBase}..HEAD`);
+  } catch {
+    return git(`diff ${targetBranch}..HEAD`);
+  }
+}
+
+export async function getCommitsFromBranch(
+  targetBranch: string
+): Promise<Array<{ hash: string; message: string }>> {
+  try {
+    const mergeBase = await git(`merge-base ${targetBranch} HEAD`);
+    const output = await git(`log --oneline ${mergeBase}..HEAD`);
+    const lines = output.split("\n").filter(Boolean);
+
+    return lines.map((line) => {
+      const [hash, ...messageParts] = line.split(" ");
+      return { hash, message: messageParts.join(" ") };
+    });
+  } catch {
+    return [];
   }
 }
