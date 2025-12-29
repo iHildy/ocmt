@@ -382,13 +382,63 @@ interface EventStreamResult {
 	error: Error | null;
 }
 
+function addPartToCollection(
+	collectedParts: Map<string, Map<string, Part>>,
+	part: Part,
+): void {
+	const messageParts = collectedParts.get(part.messageID);
+	if (messageParts) {
+		messageParts.set(part.id, part);
+		return;
+	}
+	collectedParts.set(part.messageID, new Map([[part.id, part]]));
+}
+
+function getCollectedPartsForMessage(
+	collectedParts: Map<string, Map<string, Part>>,
+	messageID: string,
+): Part[] {
+	const messageParts = collectedParts.get(messageID);
+	return messageParts ? Array.from(messageParts.values()) : [];
+}
+
+async function resolveAssistantParts(
+	client: OpencodeClient,
+	sessionID: string,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<Part[]> {
+	if (!assistantMessage) {
+		return [];
+	}
+
+	const cachedParts = getCollectedPartsForMessage(
+		collectedParts,
+		assistantMessage.id,
+	);
+	if (cachedParts.length > 0) {
+		return cachedParts;
+	}
+
+	try {
+		const message = await client.session.message({
+			path: { id: sessionID, messageID: assistantMessage.id },
+		});
+		return message.data?.parts ?? [];
+	} catch {
+		// Ignore fetch errors
+	}
+
+	return [];
+}
+
 async function processEventStream(
 	client: OpencodeClient,
 	sessionID: string,
 	spinner: ReturnType<typeof createSpinner> | null,
 	spinnerMessage: string,
 ): Promise<EventStreamResult> {
-	const collectedParts = new Map<string, Part>();
+	const collectedParts = new Map<string, Map<string, Part>>();
 	let assistantMessage: AssistantMessage | null = null;
 	let sessionError: Error | null = null;
 	let eventStream: AsyncIterable<Event> | null = null;
@@ -472,9 +522,15 @@ async function processEventStream(
 					if (info.role === "assistant") {
 						assistantMessage = info as AssistantMessage;
 						if (isAssistantMessageComplete(assistantMessage)) {
+							const parts = await resolveAssistantParts(
+								client,
+								sessionID,
+								assistantMessage,
+								collectedParts,
+							);
 							return {
 								assistantMessage,
-								parts: Array.from(collectedParts.values()),
+								parts,
 								error: null,
 							};
 						}
@@ -484,7 +540,7 @@ async function processEventStream(
 
 				case "message.part.updated": {
 					const part = event.properties.part;
-					collectedParts.set(part.id, part);
+					addPartToCollection(collectedParts, part);
 					break;
 				}
 
@@ -501,9 +557,12 @@ async function processEventStream(
 					} else {
 						sessionError = new Error("Unknown session error");
 					}
+					const parts = assistantMessage
+						? getCollectedPartsForMessage(collectedParts, assistantMessage.id)
+						: [];
 					return {
 						assistantMessage,
-						parts: Array.from(collectedParts.values()),
+						parts,
 						error: sessionError,
 					};
 				}
@@ -513,9 +572,15 @@ async function processEventStream(
 						assistantMessage &&
 						isAssistantMessageComplete(assistantMessage)
 					) {
+						const parts = await resolveAssistantParts(
+							client,
+							sessionID,
+							assistantMessage,
+							collectedParts,
+						);
 						return {
 							assistantMessage,
-							parts: Array.from(collectedParts.values()),
+							parts,
 							error: null,
 						};
 					}
@@ -566,17 +631,31 @@ async function processEventStream(
 	}
 
 	if (sessionError) {
+		const parts = assistantMessage
+			? await resolveAssistantParts(
+					client,
+					sessionID,
+					assistantMessage,
+					collectedParts,
+				)
+			: [];
 		return {
 			assistantMessage,
-			parts: Array.from(collectedParts.values()),
+			parts,
 			error: sessionError,
 		};
 	}
 
 	if (assistantMessage) {
+		const parts = await resolveAssistantParts(
+			client,
+			sessionID,
+			assistantMessage,
+			collectedParts,
+		);
 		return {
 			assistantMessage,
-			parts: Array.from(collectedParts.values()),
+			parts,
 			error: null,
 		};
 	}
