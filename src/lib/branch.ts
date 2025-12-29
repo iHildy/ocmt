@@ -175,13 +175,13 @@ export async function maybeCreateBranchForCommit(
     return "continue";
   }
 
-   let branchName: string | null = null;
-   try {
-     branchName = await resolveBranchName(diff, yes);
-   } catch (error) {
-     p.cancel(error instanceof Error ? error.message : String(error));
-     return "abort";
-    }
+  let branchName: string | null = null;
+  try {
+    branchName = await resolveBranchName(diff, yes);
+  } catch (error) {
+    p.cancel(error instanceof Error ? error.message : String(error));
+    return "abort";
+  }
   if (!branchName) return "abort";
 
   branchName = await ensureUniqueBranchName(branchName, yes);
