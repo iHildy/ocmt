@@ -14,6 +14,7 @@ import {
 	isGitRepo,
 	stageAll,
 } from "../utils/git";
+import { createSpinner } from "../utils/ui";
 
 export interface CommitOptions {
 	message?: string;
@@ -41,7 +42,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
 	// If --all flag, stage everything first
 	if (options.all && hasChanges(status)) {
-		const s = p.spinner();
+		const s = createSpinner();
 		s.start("Staging all changes");
 		await stageAll();
 		s.stop("All changes staged");
@@ -77,7 +78,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 			}
 		}
 
-		const s = p.spinner();
+		const s = createSpinner();
 		s.start("Staging all changes");
 		await stageAll();
 		s.stop("All changes staged");
@@ -137,7 +138,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
 	if (!commitMessage) {
 		// Generate commit message using AI
-		const s = p.spinner();
+		const s = createSpinner();
 		s.start("Generating commit message");
 
 		try {
@@ -196,7 +197,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		}
 
 		if (action === "regenerate") {
-			const s = p.spinner();
+			const s = createSpinner();
 			s.start("Regenerating commit message");
 
 			try {
@@ -234,7 +235,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Committing");
 
 	try {

@@ -6,13 +6,26 @@ import { commitCommand } from "./commands/commit";
 import { deslopCommand } from "./commands/deslop";
 import { prCommand } from "./commands/pr";
 import { releaseCommand } from "./commands/release";
+import { setSilentMode } from "./utils/ui";
 
 const program = new Command();
 
 program
 	.name("oc")
 	.description("AI-powered git commit message generator using opencode.ai")
-	.version("1.0.0");
+	.version("1.0.0")
+	.option("-s, --silent", "Suppress all CLI updates and animations")
+	.hook("preAction", async (thisCommand) => {
+		const opts = thisCommand.opts();
+		if (opts.silent) {
+			setSilentMode(true);
+		}
+		// Also support --changelog / -cl as flags on the main command
+		if (opts.changelog || opts.cl) {
+			await changelogCommand({});
+			process.exit(0);
+		}
+	});
 
 program
 	.argument("[message]", "Optional commit message to use directly")
@@ -83,16 +96,8 @@ program
 		await deslopCommand({ ...options, instruction });
 	});
 
-// Also support --changelog / -cl as flags on the main command
 program
 	.option("--changelog", "Generate changelog (alias for changelog command)")
-	.option("-cl", "Generate changelog (shorthand)")
-	.hook("preAction", async (thisCommand) => {
-		const opts = thisCommand.opts();
-		if (opts.changelog || opts.cl) {
-			await changelogCommand({});
-			process.exit(0);
-		}
-	});
+	.option("-cl", "Generate changelog (shorthand)");
 
 program.parse();

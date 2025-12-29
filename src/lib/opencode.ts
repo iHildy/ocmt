@@ -18,6 +18,7 @@ import {
 	getConfig,
 	getPRConfig,
 } from "./config";
+import { type createSpinner } from "../utils/ui";
 
 const execAsync = promisify(exec);
 
@@ -121,7 +122,7 @@ export interface DeslopGenerationOptions {
 	extraPrompt?: string;
 	stagedFiles?: string[];
 	notStagedFiles?: string[];
-	spinner?: ReturnType<typeof p.spinner> | null;
+	spinner?: ReturnType<typeof createSpinner> | null;
 	spinnerMessage?: string;
 }
 
@@ -384,7 +385,7 @@ interface EventStreamResult {
 async function processEventStream(
 	client: OpencodeClient,
 	sessionID: string,
-	spinner: ReturnType<typeof p.spinner> | null,
+	spinner: ReturnType<typeof createSpinner> | null,
 	spinnerMessage: string,
 ): Promise<EventStreamResult> {
 	const collectedParts = new Map<string, Part>();
@@ -605,7 +606,7 @@ interface OpencodePromptResult {
 
 async function runOpencodePrompt(
 	options: OpencodePromptOptions,
-	spinner?: ReturnType<typeof p.spinner> | null,
+	spinner?: ReturnType<typeof createSpinner> | null,
 	spinnerMessage?: string,
 ): Promise<OpencodePromptResult> {
 	const { title, prompt, model, agent, tools, directory } = options;

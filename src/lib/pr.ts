@@ -13,6 +13,7 @@ import {
 } from "../utils/git";
 import { getConfig } from "./config";
 import { generatePRContent, type PRContent } from "./opencode";
+import { createSpinner } from "../utils/ui";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -202,7 +203,7 @@ async function resolvePRContent(
 	targetBranch: string,
 	yes?: boolean,
 ): Promise<PRContent | null> {
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Generating PR title and description");
 
 	let prContent: PRContent;
@@ -269,7 +270,7 @@ async function resolvePRContent(
 	}
 
 	if (action === "regenerate") {
-		const regenSpinner = p.spinner();
+		const regenSpinner = createSpinner();
 		regenSpinner.start("Regenerating PR content");
 
 		try {
@@ -306,7 +307,7 @@ async function ensureBranchPushed(): Promise<boolean> {
 		return true;
 	}
 
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Pushing branch to remote");
 
 	try {
@@ -424,7 +425,7 @@ async function handleBrowserPRCreation(
 		defaultBranch,
 	);
 
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Opening browser");
 
 	try {
@@ -517,7 +518,7 @@ async function handleAutoPRCreation(
 		return "abort";
 	}
 
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Creating pull request");
 
 	let prUrl: string;
