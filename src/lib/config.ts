@@ -49,9 +49,7 @@ export interface OcConfig {
 		autoCreateBranchOnDefault?: boolean;
 		autoCreateBranchOnNonDefault?: boolean;
 		forceNewBranchOnDefault?: boolean;
-		autoDeslop?: boolean;
 		branchModel?: string; // format: "provider/model"
-		deslopModel?: string; // format: "provider/model"
 		model?: string; // format: "provider/model"
 	};
 	changelog?: {
@@ -83,9 +81,7 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 		autoCreateBranchOnDefault: true,
 		autoCreateBranchOnNonDefault: false,
 		forceNewBranchOnDefault: false,
-		autoDeslop: false,
 		branchModel: "opencode/gpt-5-nano",
-		deslopModel: "opencode/gpt-5",
 		model: "opencode/gpt-5-nano",
 	},
 	changelog: {

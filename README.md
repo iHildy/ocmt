@@ -39,7 +39,6 @@ AI-powered git commit message, changelog & documentation generator using [openco
 
 - Node.js >= 18.0.0
 - [OpenCode](https://opencode.ai) installed and authenticated
-- [Bun](https://bun.sh) (required for deslop review via critique)
 
 #### Install OpenCode
 
@@ -59,19 +58,13 @@ opencode auth
 
 ### Install ocmt
 
-> **Note:** iHildy's fork of ocmt requires [Bun](https://bun.sh) - it does not work with Node.js due to the `critique` dependency.
 ```bash
 # bun (recommended)
 bun install -g ocmt
-# includes critique for deslop review
 
 # npm
 npm install -g ocmt
-# missing deslop feature
 ```
-
-Note: deslop review uses `critique`, which runs on Bun. If Bun isn't installed,
-ocmt will skip the review step.
 
 ## Usage
 
@@ -163,41 +156,6 @@ oc release --commit-message "docs: update changelog for v1.2.0"
 
 ## Workflows
 
-### Deslop (AI Code Review)
-
-Deslop is an AI-powered feature that cleans up "AI slop" from your staged changes - things like excessive comments, unnecessary defensive code, or style inconsistencies that AI tools sometimes introduce.
-
-#### Standalone Command
-
-```bash
-# Deslop staged changes interactively
-oc deslop
-
-# Deslop with specific instructions
-oc deslop "Remove all JSDoc comments and simplify error handling"
-
-# Skip confirmation prompts (auto-accept changes)
-oc deslop -y
-
-# Non-interactive with instructions
-oc deslop -y "fix formatting and remove debug logs"
-```
-
-#### During Commit Flow
-
-```bash
-# Enable deslop for this commit
-oc --deslop yes
-
-# Disable deslop for this commit
-oc --deslop no
-
-# Provide custom deslop instructions
-oc --deslop "Remove all JSDoc comments and simplify error handling"
-```
-
-**Configuration:** Set `autoDeslop: true` in your `config.json` to enable by default.
-
 ### Branch Creation
 
 ocmt can automatically create feature branches with AI-generated names based on your changes.
@@ -221,7 +179,7 @@ For CI/CD or scripting, use flags to skip all prompts:
 
 ```bash
 # Commit with all defaults
-oc -ay --deslop no --skip-branch
+oc -ay --skip-branch
 
 # Generate and save changelog
 oc changelog --from v1.0.0 --save -y
@@ -258,9 +216,7 @@ Configure models, behavior, and preferences:
     "autoCreateBranchOnDefault": true,
     "autoCreateBranchOnNonDefault": false,
     "forceNewBranchOnDefault": false,
-    "autoDeslop": false,
     "branchModel": "opencode/gpt-5-nano",
-    "deslopModel": "opencode/gpt-5",
     "model": "opencode/gpt-5-nano"
   },
   "changelog": {
@@ -288,8 +244,7 @@ Models are specified in `provider/model` format:
 {
   "commit": {
     "model": "opencode/gpt-5-nano",
-    "branchModel": "opencode/gpt-5-nano",
-    "deslopModel": "opencode/gpt-5"
+    "branchModel": "opencode/gpt-5-nano"
   },
   "changelog": {
     "model": "opencode/claude-sonnet-4-5"
@@ -351,7 +306,6 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 | `oc changelog` | `oc cl` | Generate changelog from commits |
 | `oc release` | `oc rel` | Full release flow: commit, changelog, tag, push |
 | `oc pr` | - | Create a pull request for the current branch |
-| `oc deslop` | - | Deslop staged changes (standalone AI code cleanup) |
 
 ## Options
 
@@ -361,7 +315,6 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 |--------|-------------|
 | `-a, --all` | Stage all changes before committing |
 | `-y, --yes` | Skip confirmation prompts |
-| `--deslop <value>` | Deslop control: `yes`, `no`, or custom instructions |
 | `--model <model>` | Override AI model (format: `provider/model`) |
 | `--accept` | Auto-accept generated message without confirmation |
 | `--branch <name>` | Use specified branch name instead of generating |
@@ -403,22 +356,14 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 | `--browser` | Open in browser for PR creation |
 | `--open` | Auto-open PR in browser after creation |
 
-### Deslop Options
-
-| Option | Description |
-|--------|-------------|
-| `[instruction]` | Optional instructions for deslop (e.g., "remove comments") |
-| `-y, --yes` | Skip confirmation prompts and auto-accept changes |
-
 ## How It Works
 
 1. **Connects to OpenCode** - Tries to connect to an existing OpenCode server, or spawns a new one
 2. **Analyzes your changes** - Reads the staged git diff
-3. **Optional deslop** - Cleans AI slop from staged changes (if enabled). Review and accept/reject via `critique`.
-4. **Optional branch** - Creates a new branch with an AI-generated name (if enabled)
-5. **Generates message** - Sends diff to AI with your configured rules
-6. **Confirms with you** - Shows the proposed message for approval/editing
-7. **Commits** - Creates the commit with the final message
+3. **Optional branch** - Creates a new branch with an AI-generated name (if enabled)
+4. **Generates message** - Sends diff to AI with your configured rules
+5. **Confirms with you** - Shows the proposed message for approval/editing
+6. **Commits** - Creates the commit with the final message
 
 ### Default Models
 
@@ -426,7 +371,6 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 |---------|---------------|
 | Commit messages | `opencode/gpt-5-nano` |
 | Branch names | `opencode/gpt-5-nano` |
-| Deslop | `opencode/gpt-5` |
 | Changelogs | `opencode/claude-sonnet-4-5` |
 
 Models are configurable in `~/.oc/config.json` or `<repo>/.oc/config.json`. See [Configuration](#configuration) for details.

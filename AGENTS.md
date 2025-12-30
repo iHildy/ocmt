@@ -31,13 +31,11 @@ There are no automated tests. The typecheck catches most issues.
 
 **IMPORTANT: Always perform integration testing for CLI commands inside the `test-repo/` directory. This is a private, git-ignored sandbox repository specifically for this purpose.**
 
-If you need to add "slop" to the test repo to a command like this: `cd test-repo && opencode run "create a new pointless typescript file with Extra defensive checks or try/catch blocks that are abnormal for that area of the codebase (especially if called by trusted / validated codepaths" --model opencode/grok-code` and then run CLI non-interactive commands (after running `bun run build`) inside the test-repo like `bun run start --deslop yes --silent`
-
 Use these flags to test CLI functionality without interactive prompts:
 
 ```bash
 # Commit with all defaults (stages all, skips prompts, silent)
-bun run dev -- -ay --deslop no --skip-branch --silent
+bun run dev -- -ay --skip-branch --silent
 
 # Generate changelog non-interactively and silently
 bun run dev -- changelog --from v1.0.0 --save -y -s
@@ -186,7 +184,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 - `commander` - CLI argument parsing
 - `picocolors` - Terminal colors
 - `@opencode-ai/sdk` - OpenCode API client
-- `critique` - Deslop review tool (Bun-only)
 
 ## Configuration
 
