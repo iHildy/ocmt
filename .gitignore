@@ -30,4 +30,4 @@ npm-debug.log*
 coverage/
 
 # Local testing
-!test-repo/
+test-repo/
