@@ -20,6 +20,7 @@ import {
 	git,
 	isGitRepo,
 } from "../utils/git";
+import { createSpinner } from "../utils/ui";
 
 export interface ChangelogOptions {
 	from?: string;
@@ -172,7 +173,7 @@ async function handleSaveAction(
 		toRef,
 		commitCount,
 	} = params;
-	const saveSpinner = p.spinner();
+	const saveSpinner = createSpinner();
 	const outputPath = options.output || (await getChangelogPath());
 	const actionWord = changelogFileExists ? "Updating" : "Creating";
 	saveSpinner.start(`${actionWord} ${outputPath}`);
@@ -231,7 +232,7 @@ export async function changelogCommand(
 
 	// If no --from specified, show options to select
 	if (!fromRef) {
-		const s = p.spinner();
+		const s = createSpinner();
 		s.start("Fetching releases and commits");
 
 		// Check for commits since last changelog
@@ -313,7 +314,7 @@ export async function changelogCommand(
 	}
 
 	// Get commits between refs
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start(`Fetching commits ${fromRef}..${toRef}`);
 
 	try {
@@ -341,7 +342,7 @@ export async function changelogCommand(
 		}
 
 		// Generate changelog
-		const genSpinner = p.spinner();
+		const genSpinner = createSpinner();
 		genSpinner.start("Generating changelog");
 
 		try {

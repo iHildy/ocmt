@@ -72,6 +72,7 @@ export interface OcConfig {
 	general?: {
 		confirmPrompts?: boolean;
 		verbose?: boolean;
+		silent?: boolean;
 	};
 }
 
@@ -105,6 +106,7 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 	general: {
 		confirmPrompts: true,
 		verbose: false,
+		silent: false,
 	},
 };
 

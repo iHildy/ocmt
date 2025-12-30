@@ -8,6 +8,7 @@ import {
 } from "../utils/git";
 import { getConfig } from "./config";
 import { generateBranchName } from "./opencode";
+import { createSpinner } from "../utils/ui";
 
 export type BranchFlowResult = "continue" | "abort";
 
@@ -31,7 +32,7 @@ async function resolveBranchName(
 	diff: string,
 	yes?: boolean,
 ): Promise<string | null> {
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start("Generating branch name");
 
 	let branchName = await generateBranchName({ diff });
@@ -78,7 +79,7 @@ async function resolveBranchName(
 	}
 
 	if (action === "regenerate") {
-		const regenSpinner = p.spinner();
+		const regenSpinner = createSpinner();
 		regenSpinner.start("Regenerating branch name");
 
 		branchName = await generateBranchName({ diff });
@@ -203,7 +204,7 @@ export async function maybeCreateBranchForCommit(
 	branchName = await ensureUniqueBranchName(branchName, yes);
 	if (!branchName) return "abort";
 
-	const s = p.spinner();
+	const s = createSpinner();
 	s.start(`Creating branch "${branchName}"`);
 
 	try {

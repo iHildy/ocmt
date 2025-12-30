@@ -11,6 +11,7 @@ import {
 } from "../utils/git";
 import { getConfig } from "./config";
 import { runDeslopEdits } from "./opencode";
+import { createSpinner } from "../utils/ui";
 
 export type DeslopFlowResult = "continue" | "abort" | "updated";
 
@@ -144,8 +145,9 @@ export async function maybeDeslopStagedChanges(
 		]),
 	);
 
-	const s = p.spinner();
-	s.start("Deslopping staged changes");
+	const s = createSpinner();
+	const spinnerMessage = "Deslopping staged changes";
+	s.start(spinnerMessage);
 
 	let deslopSession: Awaited<ReturnType<typeof runDeslopEdits>> | null = null;
 	let snapshotRef: string | null = null;
@@ -161,6 +163,8 @@ export async function maybeDeslopStagedChanges(
 			extraPrompt,
 			stagedFiles,
 			notStagedFiles,
+			spinner: s,
+			spinnerMessage,
 		});
 
 		summary = deslopSession.summary?.trim() || null;

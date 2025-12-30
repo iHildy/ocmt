@@ -4,8 +4,11 @@ import * as p from "@clack/prompts";
 import {
 	createOpencode,
 	createOpencodeClient,
+	type AssistantMessage,
+	type Event,
 	type OpencodeClient,
 	type Part,
+	type Permission,
 	type TextPart,
 } from "@opencode-ai/sdk";
 import color from "picocolors";
@@ -15,12 +18,19 @@ import {
 	getConfig,
 	getPRConfig,
 } from "./config";
+import type { createSpinner } from "../utils/ui";
 
 const execAsync = promisify(exec);
 
 // Default models (used as fallback)
 const DEFAULT_COMMIT_MODEL = "opencode/gpt-5-nano";
 const DEFAULT_CHANGELOG_MODEL = "opencode/claude-sonnet-4-5";
+
+// Timeout constants
+const PERMISSION_PROMPT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for user to respond to permission
+const OPERATION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for overall operation
+
+type PermissionResponse = "once" | "always" | "reject";
 
 interface ModelConfig {
 	providerID: string;
@@ -112,6 +122,8 @@ export interface DeslopGenerationOptions {
 	extraPrompt?: string;
 	stagedFiles?: string[];
 	notStagedFiles?: string[];
+	spinner?: ReturnType<typeof createSpinner> | null;
+	spinnerMessage?: string;
 }
 
 export interface DeslopEditResult {
@@ -262,6 +274,496 @@ function extractDeslopSummary(text: string): string | null {
 	return summaryMatch ? summaryMatch[1].trim() : null;
 }
 
+function formatPermissionDescription(permission: Permission): string {
+	const { type, title, pattern, metadata } = permission;
+
+	let description = title || `Permission requested: ${type}`;
+
+	if (type === "bash" || type === "shell") {
+		const metadataCommand =
+			metadata && typeof metadata === "object" && "command" in metadata
+				? metadata.command
+				: null;
+		const metadataCmd =
+			metadata && typeof metadata === "object" && "cmd" in metadata
+				? metadata.cmd
+				: null;
+
+		const command = pattern || metadataCommand || metadataCmd || null;
+		if (command && (typeof command === "string" || Array.isArray(command))) {
+			const commandStr = Array.isArray(command) ? command.join(" ") : command;
+			description = `Run bash command:\n${color.cyan(commandStr)}`;
+		}
+	} else if (type === "edit" || type === "file") {
+		const metadataPath =
+			metadata && typeof metadata === "object" && "path" in metadata
+				? metadata.path
+				: null;
+		const metadataFile =
+			metadata && typeof metadata === "object" && "file" in metadata
+				? metadata.file
+				: null;
+
+		const filePath = pattern || metadataPath || metadataFile;
+		if (filePath && (typeof filePath === "string" || Array.isArray(filePath))) {
+			const pathStr = Array.isArray(filePath) ? filePath.join(", ") : filePath;
+			description = `Edit file:\n${color.cyan(pathStr)}`;
+		}
+	} else if (type === "webfetch") {
+		const metadataUrl =
+			metadata && typeof metadata === "object" && "url" in metadata
+				? metadata.url
+				: null;
+
+		const url = pattern || metadataUrl;
+		if (url && (typeof url === "string" || Array.isArray(url))) {
+			const urlStr = Array.isArray(url) ? url.join(", ") : url;
+			description = `Fetch URL:\n${color.cyan(urlStr)}`;
+		}
+	} else if (type === "doom_loop") {
+		description = `Doom loop detected (same tool called 3+ times with identical arguments).\nAllow continuation?`;
+	} else if (type === "external_directory") {
+		const metadataPath =
+			metadata && typeof metadata === "object" && "path" in metadata
+				? metadata.path
+				: null;
+
+		const path = pattern || metadataPath;
+		if (path && (typeof path === "string" || Array.isArray(path))) {
+			const pathStr = Array.isArray(path) ? path.join(", ") : path;
+			description = `Access file outside working directory:\n${color.cyan(pathStr)}`;
+		}
+	}
+
+	return description;
+}
+
+async function promptUserForPermission(
+	permission: Permission,
+): Promise<PermissionResponse> {
+	const description = formatPermissionDescription(permission);
+
+	const result = await p.select({
+		message: description,
+		options: [
+			{ value: "once", label: "Allow once" },
+			{ value: "always", label: "Always allow (this session)" },
+			{ value: "reject", label: "Reject" },
+		],
+	});
+
+	if (p.isCancel(result)) {
+		return "reject";
+	}
+
+	return result as PermissionResponse;
+}
+
+function isPermission(value: unknown): value is Permission {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const obj = value as Record<string, unknown>;
+	return "id" in obj && typeof obj.id === "string";
+}
+
+function isEventForSession(event: Event, sessionID: string): boolean {
+	if (typeof event.properties !== "object" || !event.properties) {
+		return false;
+	}
+
+	const checkList: unknown[] = [
+		event.properties,
+		(event.properties as Record<string, unknown>).info,
+		(event.properties as Record<string, unknown>).part,
+	];
+
+	for (const item of checkList) {
+		if (
+			item &&
+			typeof item === "object" &&
+			"sessionID" in item &&
+			(item as { sessionID: string }).sessionID === sessionID
+		) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function isAssistantMessageComplete(message: AssistantMessage): boolean {
+	return message.time.completed !== undefined;
+}
+
+interface EventStreamResult {
+	assistantMessage: AssistantMessage | null;
+	parts: Part[];
+	error: Error | null;
+}
+
+function addPartToCollection(
+	collectedParts: Map<string, Map<string, Part>>,
+	part: Part,
+): void {
+	const messageParts = collectedParts.get(part.messageID);
+	if (messageParts) {
+		messageParts.set(part.id, part);
+		return;
+	}
+	collectedParts.set(part.messageID, new Map([[part.id, part]]));
+}
+
+function getCollectedPartsForMessage(
+	collectedParts: Map<string, Map<string, Part>>,
+	messageID: string,
+): Part[] {
+	const messageParts = collectedParts.get(messageID);
+	return messageParts ? Array.from(messageParts.values()) : [];
+}
+
+async function resolveAssistantParts(
+	client: OpencodeClient,
+	sessionID: string,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<Part[]> {
+	if (!assistantMessage) {
+		return [];
+	}
+
+	const cachedParts = getCollectedPartsForMessage(
+		collectedParts,
+		assistantMessage.id,
+	);
+	if (cachedParts.length > 0) {
+		return cachedParts;
+	}
+
+	try {
+		const message = await client.session.message({
+			path: { id: sessionID, messageID: assistantMessage.id },
+		});
+		return message.data?.parts ?? [];
+	} catch {
+		// Ignore fetch errors
+	}
+
+	return [];
+}
+
+async function handlePermissionEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	permission: Permission,
+	spinner: ReturnType<typeof createSpinner> | null,
+	spinnerMessage: string,
+): Promise<void> {
+	if (spinner) {
+		spinner.stop("Permission required");
+	}
+
+	let response: PermissionResponse;
+	try {
+		const timeoutPromise = new Promise<PermissionResponse>((resolve) => {
+			setTimeout(() => resolve("reject"), PERMISSION_PROMPT_TIMEOUT_MS);
+		});
+
+		response = await Promise.race([
+			promptUserForPermission(permission),
+			timeoutPromise,
+		]);
+	} catch {
+		response = "reject";
+	}
+
+	try {
+		await client.postSessionIdPermissionsPermissionId({
+			path: { id: sessionID, permissionID: permission.id },
+			body: { response },
+		});
+	} catch (err) {
+		p.log.warn(
+			`Failed to send permission response: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	if (spinner && spinnerMessage) {
+		spinner.start(spinnerMessage);
+	}
+}
+
+async function handleMessageUpdatedEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	info: unknown,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<EventStreamResult | null> {
+	if (
+		typeof info === "object" &&
+		info !== null &&
+		"role" in info &&
+		info.role === "assistant"
+	) {
+		const assistantMessage = info as AssistantMessage;
+		if (isAssistantMessageComplete(assistantMessage)) {
+			const parts = await resolveAssistantParts(
+				client,
+				sessionID,
+				assistantMessage,
+				collectedParts,
+			);
+			return {
+				assistantMessage,
+				parts,
+				error: null,
+			};
+		}
+	}
+	return null;
+}
+
+function handleSessionErrorEvent(
+	errorProps: Record<string, unknown>,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): EventStreamResult {
+	const errorData = errorProps.error as
+		| { name: string; data?: { message?: string } }
+		| undefined;
+	let sessionError: Error;
+
+	if (errorData) {
+		const errorMessage =
+			"data" in errorData && errorData.data
+				? errorData.data.message || errorData.name
+				: errorData.name;
+		sessionError = new Error(errorMessage || "Session error occurred");
+	} else {
+		sessionError = new Error("Unknown session error");
+	}
+
+	const parts = assistantMessage
+		? getCollectedPartsForMessage(collectedParts, assistantMessage.id)
+		: [];
+
+	return {
+		assistantMessage,
+		parts,
+		error: sessionError,
+	};
+}
+
+async function handleSessionIdleEvent(
+	client: OpencodeClient,
+	sessionID: string,
+	assistantMessage: AssistantMessage | null,
+	collectedParts: Map<string, Map<string, Part>>,
+): Promise<EventStreamResult | null> {
+	if (assistantMessage && isAssistantMessageComplete(assistantMessage)) {
+		const parts = await resolveAssistantParts(
+			client,
+			sessionID,
+			assistantMessage,
+			collectedParts,
+		);
+		return {
+			assistantMessage,
+			parts,
+			error: null,
+		};
+	}
+	return null;
+}
+
+async function processEventStream(
+	client: OpencodeClient,
+	sessionID: string,
+	spinner: ReturnType<typeof createSpinner> | null,
+	spinnerMessage: string,
+): Promise<EventStreamResult> {
+	const collectedParts = new Map<string, Map<string, Part>>();
+	let assistantMessage: AssistantMessage | null = null;
+	let sessionError: Error | null = null;
+	let eventStream: AsyncIterable<Event> | null = null;
+	let reconnectAttempted = false;
+
+	const startTime = Date.now();
+
+	const connectToEventStream = async (): Promise<AsyncIterable<Event>> => {
+		const response = await client.event.subscribe();
+		if (!response.stream) {
+			throw new Error("Failed to subscribe to event stream");
+		}
+		return response.stream;
+	};
+
+	try {
+		eventStream = await connectToEventStream();
+	} catch (err) {
+		throw new Error(
+			`Failed to connect to event stream: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	try {
+		for await (const event of eventStream) {
+			if (Date.now() - startTime > OPERATION_TIMEOUT_MS) {
+				sessionError = new Error("Operation timed out");
+				break;
+			}
+
+			if (!isEventForSession(event, sessionID)) {
+				continue;
+			}
+
+			switch (event.type) {
+				case "permission.updated": {
+					if (!isPermission(event.properties)) {
+						p.log.warn("Invalid permission event properties");
+						break;
+					}
+					await handlePermissionEvent(
+						client,
+						sessionID,
+						event.properties,
+						spinner,
+						spinnerMessage,
+					);
+					break;
+				}
+
+				case "message.updated": {
+					const info = event.properties.info;
+					const result = await handleMessageUpdatedEvent(
+						client,
+						sessionID,
+						info,
+						collectedParts,
+					);
+					if (result) {
+						assistantMessage = result.assistantMessage;
+						return result;
+					}
+					if (
+						typeof info === "object" &&
+						info !== null &&
+						"role" in info &&
+						info.role === "assistant"
+					) {
+						assistantMessage = info as AssistantMessage;
+					}
+					break;
+				}
+
+				case "message.part.updated": {
+					const part = event.properties.part;
+					addPartToCollection(collectedParts, part);
+					break;
+				}
+
+				case "session.error": {
+					return handleSessionErrorEvent(
+						event.properties as Record<string, unknown>,
+						assistantMessage,
+						collectedParts,
+					);
+				}
+
+				case "session.idle": {
+					const result = await handleSessionIdleEvent(
+						client,
+						sessionID,
+						assistantMessage,
+						collectedParts,
+					);
+					if (result) {
+						return result;
+					}
+					break;
+				}
+			}
+		}
+	} catch (streamError) {
+		if (!reconnectAttempted) {
+			reconnectAttempted = true;
+			p.log.warn(
+				`Event stream disconnected: ${streamError instanceof Error ? streamError.message : String(streamError)}`,
+			);
+			try {
+				const sessionStatus = await client.session.get({
+					path: { id: sessionID },
+				});
+
+				if (sessionStatus.data) {
+					const messages = await client.session.messages({
+						path: { id: sessionID },
+					});
+
+					if (messages.data && messages.data.length > 0) {
+						const lastMessage = messages.data[messages.data.length - 1];
+						if (lastMessage.info.role === "assistant") {
+							const assistantInfo = lastMessage.info as AssistantMessage;
+							if (isAssistantMessageComplete(assistantInfo)) {
+								return {
+									assistantMessage: assistantInfo,
+									parts: lastMessage.parts,
+									error: null,
+								};
+							}
+						}
+					}
+				}
+			} catch (reconnectError) {
+				try {
+					await client.session.abort({ path: { id: sessionID } });
+				} catch {
+					// Ignore abort errors
+				}
+				throw new Error(
+					`Event stream disconnected and reconnect failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`,
+				);
+			}
+		}
+	}
+
+	if (sessionError) {
+		const parts = assistantMessage
+			? await resolveAssistantParts(
+					client,
+					sessionID,
+					assistantMessage,
+					collectedParts,
+				)
+			: [];
+		return {
+			assistantMessage,
+			parts,
+			error: sessionError,
+		};
+	}
+
+	if (assistantMessage) {
+		const parts = await resolveAssistantParts(
+			client,
+			sessionID,
+			assistantMessage,
+			collectedParts,
+		);
+		return {
+			assistantMessage,
+			parts,
+			error: null,
+		};
+	}
+
+	return {
+		assistantMessage: null,
+		parts: [],
+		error: new Error("Event stream ended without completing"),
+	};
+}
+
 interface OpencodePromptOptions {
 	title: string;
 	prompt: string;
@@ -280,6 +782,8 @@ interface OpencodePromptResult {
 
 async function runOpencodePrompt(
 	options: OpencodePromptOptions,
+	spinner?: ReturnType<typeof createSpinner> | null,
+	spinnerMessage?: string,
 ): Promise<OpencodePromptResult> {
 	const { title, prompt, model, agent, tools, directory } = options;
 	const client = await getClient();
@@ -293,6 +797,8 @@ async function runOpencodePrompt(
 		throw new Error("Failed to create session");
 	}
 
+	const sessionID = session.data.id;
+
 	let closed = false;
 	const close = async (): Promise<void> => {
 		if (closed) {
@@ -300,15 +806,15 @@ async function runOpencodePrompt(
 		}
 		closed = true;
 		try {
-			await client.session.delete({ path: { id: session.data.id } });
+			await client.session.delete({ path: { id: sessionID } });
 		} catch {
 			// Ignore cleanup errors
 		}
 	};
 
 	try {
-		const result = await client.session.prompt({
-			path: { id: session.data.id },
+		await client.session.promptAsync({
+			path: { id: sessionID },
 			...(directory ? { query: { directory } } : {}),
 			body: {
 				model,
@@ -318,24 +824,36 @@ async function runOpencodePrompt(
 			},
 		});
 
-		if (!result.data) {
+		const result = await processEventStream(
+			client,
+			sessionID,
+			spinner ?? null,
+			spinnerMessage ?? "",
+		);
+
+		if (result.error) {
+			await close();
+			throw result.error;
+		}
+
+		if (!result.assistantMessage) {
 			await close();
 			throw new Error(`Failed to get AI response from ${modelID}`);
 		}
 
-		const message = extractTextFromParts(result.data.parts || []);
+		const message = extractTextFromParts(result.parts);
 
 		if (!message) {
 			await close();
 			throw new Error(
-				`No response generated by ${modelID}. Response: ${JSON.stringify(result.data)}`,
+				`No response generated by ${modelID}. Response: ${JSON.stringify(result.assistantMessage)}`,
 			);
 		}
 
 		return {
 			message,
-			sessionID: session.data.id,
-			messageID: result.data.info.id,
+			sessionID,
+			messageID: result.assistantMessage.id,
 			close,
 		};
 	} catch (err) {
@@ -414,12 +932,16 @@ export async function runDeslopEdits(
 	const deslopModel = await getDeslopModel();
 	const prompt = buildDeslopPrompt(options);
 
-	const { message, sessionID, messageID, close } = await runOpencodePrompt({
-		title: "oc-deslop",
-		prompt,
-		model: deslopModel,
-		directory: process.cwd(),
-	});
+	const { message, sessionID, messageID, close } = await runOpencodePrompt(
+		{
+			title: "oc-deslop",
+			prompt,
+			model: deslopModel,
+			directory: process.cwd(),
+		},
+		options.spinner,
+		options.spinnerMessage,
+	);
 	const summary = extractDeslopSummary(message);
 
 	return {

@@ -26,6 +26,7 @@ import {
 	isGitRepo,
 	stageAll,
 } from "../utils/git";
+import { createSpinner } from "../utils/ui";
 
 export interface ReleaseOptions {
 	from?: string;
@@ -163,7 +164,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 					}
 				}
 
-				const stageSpinner = p.spinner();
+				const stageSpinner = createSpinner();
 				stageSpinner.start("Staging all changes");
 				await stageAll();
 				stageSpinner.stop("All changes staged");
@@ -212,7 +213,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 						process.exit(0);
 					}
 
-					const genSpinner = p.spinner();
+					const genSpinner = createSpinner();
 					genSpinner.start("Generating commit message");
 
 					const commitMessage = await generateCommitMessage({ diff });
@@ -233,7 +234,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 						}
 					}
 
-					const commitSpinner = p.spinner();
+					const commitSpinner = createSpinner();
 					commitSpinner.start("Committing");
 					await commit(commitMessage);
 					commitSpinner.stop("Changes committed");
@@ -329,7 +330,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 
 			p.log.step(`Release version: ${color.cyan(version)}`);
 
-			const changelogSpinner = p.spinner();
+			const changelogSpinner = createSpinner();
 			changelogSpinner.start("Generating changelog");
 
 			const changelog = await generateChangelog({
@@ -344,7 +345,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 				`Changelog preview:\n${color.dim(changelog.slice(0, 500))}${changelog.length > 500 ? "..." : ""}`,
 			);
 
-			const saveSpinner = p.spinner();
+			const saveSpinner = createSpinner();
 			const changelogFileExists = await changelogExists();
 			saveSpinner.start(
 				`${changelogFileExists ? "Updating" : "Creating"} CHANGELOG.md`,
@@ -355,7 +356,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 				`${changelogFileExists ? "Updated" : "Created"} CHANGELOG.md`,
 			);
 
-			const changelogCommitSpinner = p.spinner();
+			const changelogCommitSpinner = createSpinner();
 			changelogCommitSpinner.start("Committing changelog");
 
 			await git("add CHANGELOG.md");
@@ -387,7 +388,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 			}
 
 			if (shouldTag) {
-				const tagSpinner = p.spinner();
+				const tagSpinner = createSpinner();
 				tagSpinner.start(`Creating tag ${tagName}`);
 
 				try {
@@ -410,7 +411,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 					}
 
 					if (shouldPush) {
-						const pushSpinner = p.spinner();
+						const pushSpinner = createSpinner();
 						pushSpinner.start("Pushing to remote");
 
 						try {

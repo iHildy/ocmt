@@ -29,20 +29,21 @@ There are no automated tests. The typecheck catches most issues.
 
 ### Testing CLI Commands (Non-Interactive Mode)
 
+**IMPORTANT: Always perform integration testing for CLI commands inside the `test-repo/` directory. This is a private, git-ignored sandbox repository specifically for this purpose.**
+
+If you need to add "slop" to the test repo to a command like this: `cd test-repo && opencode run "create a new pointless typescript file with Extra defensive checks or try/catch blocks that are abnormal for that area of the codebase (especially if called by trusted / validated codepaths" --model opencode/grok-code` and then run CLI non-interactive commands (after running `bun run build`) inside the test-repo like `bun run start --deslop yes --silent`
+
 Use these flags to test CLI functionality without interactive prompts:
 
 ```bash
-# Commit with all defaults (stages all, skips prompts)
-bun run dev -- -ay --deslop no --skip-branch
+# Commit with all defaults (stages all, skips prompts, silent)
+bun run dev -- -ay --deslop no --skip-branch --silent
 
-# Generate changelog non-interactively
-bun run dev -- changelog --from v1.0.0 --save -y
+# Generate changelog non-interactively and silently
+bun run dev -- changelog --from v1.0.0 --save -y -s
 
 # Create PR non-interactively
-bun run dev -- pr -y --title "Test PR" --body "Description" -b main
-
-# Deslop without prompts
-bun run dev -- deslop -y "remove comments"
+bun run dev -- pr -y --title "Test PR" --body "Description" -b main --silent
 ```
 
 ## Project Structure
@@ -74,6 +75,7 @@ import color from "picocolors";
 // Internal imports
 import { isGitRepo, type GitStatus } from "../utils/git";
 import { generateCommitMessage, cleanup } from "../lib/opencode";
+import { createSpinner } from "../utils/ui";
 ```
 
 ### Naming Conventions
@@ -111,7 +113,9 @@ throw new Error(`Git command failed: ${error instanceof Error ? error.message : 
 ### Async Operations with Spinners
 
 ```typescript
-const s = p.spinner();
+import { createSpinner } from "../utils/ui";
+
+const s = createSpinner();
 s.start("Generating commit message");
 try {
   const result = await generateCommitMessage({ diff });
