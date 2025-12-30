@@ -3,10 +3,6 @@ import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
-import {
-	getAndValidateStagedDiff,
-	maybeDeslopStagedChanges,
-} from "../lib/deslop";
 import { addHistoryEntry } from "../lib/history";
 import {
 	cleanup,
@@ -185,61 +181,42 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 			let diff: string | null = await getStagedDiff();
 
 			if (diff) {
-				const deslopResult = await maybeDeslopStagedChanges({
-					stagedDiff: diff,
+				const branchFlow = await maybeCreateBranchForCommit({
+					diff,
 					yes: options.yes,
 				});
 
-				if (deslopResult === "abort") {
+				if (branchFlow === "abort") {
 					cleanup();
 					process.exit(0);
 				}
 
-				if (deslopResult === "updated") {
-					diff = await getAndValidateStagedDiff(
-						"No staged diff to commit after deslop",
-					);
-				}
+				const genSpinner = createSpinner();
+				genSpinner.start("Generating commit message");
 
-				if (!diff) {
-				} else {
-					const branchFlow = await maybeCreateBranchForCommit({
-						diff,
-						yes: options.yes,
+				const commitMessage = await generateCommitMessage({ diff });
+				genSpinner.stop("Commit message generated");
+
+				p.log.info(`Commit message: ${color.cyan(`"${commitMessage}"`)}`);
+
+				if (!options.yes) {
+					const confirmCommit = await p.confirm({
+						message: "Commit with this message?",
+						initialValue: true,
 					});
 
-					if (branchFlow === "abort") {
+					if (p.isCancel(confirmCommit) || !confirmCommit) {
+						p.cancel("Aborted");
 						cleanup();
 						process.exit(0);
 					}
-
-					const genSpinner = createSpinner();
-					genSpinner.start("Generating commit message");
-
-					const commitMessage = await generateCommitMessage({ diff });
-					genSpinner.stop("Commit message generated");
-
-					p.log.info(`Commit message: ${color.cyan(`"${commitMessage}"`)}`);
-
-					if (!options.yes) {
-						const confirmCommit = await p.confirm({
-							message: "Commit with this message?",
-							initialValue: true,
-						});
-
-						if (p.isCancel(confirmCommit) || !confirmCommit) {
-							p.cancel("Aborted");
-							cleanup();
-							process.exit(0);
-						}
-					}
-
-					const commitSpinner = createSpinner();
-					commitSpinner.start("Committing");
-					await commit(commitMessage);
-					commitSpinner.stop("Changes committed");
-					_madeCommit = true;
 				}
+
+				const commitSpinner = createSpinner();
+				commitSpinner.start("Committing");
+				await commit(commitMessage);
+				commitSpinner.stop("Changes committed");
+				_madeCommit = true;
 			}
 		}
 	} else {

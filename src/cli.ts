@@ -3,7 +3,6 @@
 import { Command } from "commander";
 import { changelogCommand } from "./commands/changelog";
 import { commitCommand } from "./commands/commit";
-import { deslopCommand } from "./commands/deslop";
 import { prCommand } from "./commands/pr";
 import { releaseCommand } from "./commands/release";
 import { setSilentMode } from "./utils/ui";
@@ -31,10 +30,6 @@ program
 	.argument("[message]", "Optional commit message to use directly")
 	.option("-a, --all", "Stage all changes before committing")
 	.option("-y, --yes", "Skip confirmation prompts")
-	.option(
-		"--deslop <value>",
-		"Deslop control: 'yes', 'no', or custom instructions",
-	)
 	.option("--model <model>", "Override AI model (format: provider/model)")
 	.option("--accept", "Auto-accept generated message without confirmation")
 	.option("--branch <name>", "Use specified branch name instead of generating")
@@ -86,14 +81,6 @@ program
 	.option("--open", "Auto-open PR in browser after creation")
 	.action(async (options) => {
 		await prCommand(options);
-	});
-
-program
-	.command("deslop [instruction]")
-	.description("Deslop staged changes with optional instructions")
-	.option("-y, --yes", "Skip confirmation prompts and auto-accept changes")
-	.action(async (instruction, options) => {
-		await deslopCommand({ ...options, instruction });
 	});
 
 program

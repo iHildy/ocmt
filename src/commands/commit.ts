@@ -1,15 +1,12 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
-import {
-	getAndValidateStagedDiff,
-	maybeDeslopStagedChanges,
-} from "../lib/deslop";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
 import {
 	commit,
 	type GitStatus,
+	getStagedDiff,
 	getStatus,
 	isGitRepo,
 	stageAll,
@@ -20,7 +17,6 @@ export interface CommitOptions {
 	message?: string;
 	all?: boolean;
 	yes?: boolean;
-	deslop?: string;
 	model?: string;
 	accept?: boolean;
 	branch?: string;
@@ -92,29 +88,11 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 	p.log.success(`Staged changes:\n${stagedFiles}`);
 
 	// Get the diff
-	let diff = await getAndValidateStagedDiff();
+	const diff = await getStagedDiff();
 	if (!diff) {
+		p.outro(color.yellow("No diff content to analyze"));
 		cleanup();
 		process.exit(0);
-	}
-
-	const deslopResult = await maybeDeslopStagedChanges({
-		stagedDiff: diff,
-		yes: options.yes,
-		deslopOverride: options.deslop,
-	});
-
-	if (deslopResult === "abort") {
-		cleanup();
-		process.exit(0);
-	}
-
-	if (deslopResult === "updated") {
-		diff = await getAndValidateStagedDiff();
-		if (!diff) {
-			cleanup();
-			process.exit(0);
-		}
 	}
 
 	// Show diff summary
