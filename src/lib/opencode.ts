@@ -11,6 +11,7 @@ import {
 } from "@opencode-ai/sdk";
 import color from "picocolors";
 import {
+	getBranchConfig,
 	getChangelogConfig,
 	getCommitConfig,
 	getConfig,
@@ -385,9 +386,9 @@ export async function generateBranchName(
 ): Promise<string> {
 	const { diff, context } = options;
 
-	const systemPrompt = await getCommitConfig();
+	const systemPrompt = await getBranchConfig();
 
-	let prompt = `${systemPrompt}\n\n---\n\nGenerate a concise git branch name for the following diff.\n\nRules:\n- Use lowercase letters\n- Use hyphens to separate words\n- Optional prefix like "feat/" or "fix/"\n- No spaces, quotes, or markdown\n- Keep it under 50 characters\n\nDiff:\n\`\`\`diff\n${diff}\n\`\`\``;
+	let prompt = `${systemPrompt}\n\n---\n\nGenerate a branch name for the following diff.\n\nDiff:\n\`\`\`diff\n${diff}\n\`\`\``;
 
 	if (context) {
 		prompt += `\n\nAdditional context: ${context}`;
