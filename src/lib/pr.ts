@@ -11,6 +11,11 @@ import {
 	hasUpstreamBranch,
 	pushBranch,
 } from "../utils/git";
+import {
+	detectCommitIntent,
+	promptForIntent,
+	replaceCommitIntent,
+} from "../utils/intent";
 import { getConfig } from "./config";
 import { generatePRContent, type PRContent } from "./opencode";
 import { createSpinner } from "../utils/ui";
@@ -227,79 +232,101 @@ async function resolvePRContent(
 	p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
 	p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
 
-	const action = await p.select({
-		message: "What would you like to do?",
-		options: [
-			{ value: "create", label: "Create PR with this content" },
-			{ value: "edit", label: "Edit content" },
-			{ value: "regenerate", label: "Regenerate content" },
-			{ value: "cancel", label: "Cancel" },
-		],
-	});
-
-	if (p.isCancel(action) || action === "cancel") {
-		return null;
-	}
-
-	if (action === "edit") {
-		const editedTitle = await p.text({
-			message: "Enter PR title:",
-			initialValue: prContent.title,
-			validate: (value) => {
-				if (!value.trim()) return "PR title cannot be empty";
-			},
+	while (true) {
+		const action = await p.select({
+			message: "What would you like to do?",
+			options: [
+				{ value: "create", label: "Create PR with this content" },
+				{ value: "intent", label: "Change intent" },
+				{ value: "edit", label: "Edit content" },
+				{ value: "regenerate", label: "Regenerate content" },
+				{ value: "cancel", label: "Cancel" },
+			],
 		});
 
-		if (p.isCancel(editedTitle)) {
+		if (p.isCancel(action) || action === "cancel") {
 			return null;
 		}
 
-		const editedBody = await p.text({
-			message: "Enter PR body:",
-			initialValue: prContent.body,
-		});
-
-		if (p.isCancel(editedBody)) {
-			return null;
+		if (action === "create") {
+			return prContent;
 		}
 
-		return {
-			title: editedTitle,
-			body: editedBody || "",
-		};
-	}
+		if (action === "intent") {
+			const currentIntent = detectCommitIntent(prContent.title);
+			const newIntent = await promptForIntent(currentIntent);
 
-	if (action === "regenerate") {
-		const regenSpinner = createSpinner();
-		regenSpinner.start("Regenerating PR content");
+			if (p.isCancel(newIntent)) {
+				continue;
+			}
 
-		try {
-			prContent = await generatePRContent({
-				diff,
-				commits,
-				sourceBranch,
-				targetBranch,
+			prContent.title = replaceCommitIntent(
+				prContent.title,
+				newIntent as string,
+			);
+			p.log.step(
+				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
+			);
+			continue;
+		}
+
+		if (action === "edit") {
+			const editedTitle = await p.text({
+				message: "Enter PR title:",
+				initialValue: prContent.title,
+				validate: (value) => {
+					if (!value.trim()) return "PR title cannot be empty";
+				},
 			});
-			regenSpinner.stop("PR content regenerated");
-		} catch (error) {
-			regenSpinner.stop("Failed to regenerate PR content");
-			throw error;
+
+			if (p.isCancel(editedTitle)) {
+				continue;
+			}
+
+			const editedBody = await p.text({
+				message: "Enter PR body:",
+				initialValue: prContent.body,
+			});
+
+			if (p.isCancel(editedBody)) {
+				continue;
+			}
+
+			prContent = {
+				title: editedTitle,
+				body: editedBody || "",
+			};
+			p.log.step(
+				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
+			);
+			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
+			continue;
 		}
 
-		p.log.step(`New PR title:\n${color.white(`  "${prContent.title}"`)}`);
-		p.log.step(`New PR body:\n${color.dim(prContent.body)}`);
+		if (action === "regenerate") {
+			const regenSpinner = createSpinner();
+			regenSpinner.start("Regenerating PR content");
 
-		const confirmNew = await p.confirm({
-			message: "Use this content?",
-			initialValue: true,
-		});
+			try {
+				prContent = await generatePRContent({
+					diff,
+					commits,
+					sourceBranch,
+					targetBranch,
+				});
+				regenSpinner.stop("PR content regenerated");
+			} catch (error) {
+				regenSpinner.stop("Failed to regenerate PR content");
+				throw error;
+			}
 
-		if (p.isCancel(confirmNew) || !confirmNew) {
-			return null;
+			p.log.step(
+				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
+			);
+			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
+			continue;
 		}
 	}
-
-	return prContent;
 }
 
 async function ensureBranchPushed(): Promise<boolean> {

@@ -6,6 +6,11 @@ import {
 	getCurrentBranch,
 	getDefaultBranch,
 } from "../utils/git";
+import {
+	detectBranchIntent,
+	promptForIntent,
+	replaceBranchIntent,
+} from "../utils/intent";
 import { getConfig } from "./config";
 import { generateBranchName } from "./opencode";
 import { createSpinner } from "../utils/ui";
@@ -46,60 +51,71 @@ async function resolveBranchName(
 
 	p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 
-	const action = await p.select({
-		message: "What would you like to do?",
-		options: [
-			{ value: "create", label: "Create branch with this name" },
-			{ value: "edit", label: "Edit name" },
-			{ value: "regenerate", label: "Regenerate name" },
-			{ value: "cancel", label: "Cancel" },
-		],
-	});
-
-	if (p.isCancel(action) || action === "cancel") {
-		return null;
-	}
-
-	if (action === "edit") {
-		const editedName = await p.text({
-			message: "Enter branch name:",
-			initialValue: branchName,
-			validate: (value) => {
-				if (!value.trim()) return "Branch name cannot be empty";
-				if (/\s/.test(value)) return "Branch name cannot contain spaces";
-			},
+	while (true) {
+		const action = await p.select({
+			message: "What would you like to do?",
+			options: [
+				{ value: "create", label: "Create branch with this name" },
+				{ value: "intent", label: "Change intent" },
+				{ value: "edit", label: "Edit name" },
+				{ value: "regenerate", label: "Regenerate name" },
+				{ value: "cancel", label: "Cancel" },
+			],
 		});
 
-		if (p.isCancel(editedName)) {
+		if (p.isCancel(action) || action === "cancel") {
 			return null;
 		}
 
-		branchName = normalizeBranchName(editedName);
-		return branchName;
-	}
+		if (action === "create") {
+			return branchName;
+		}
 
-	if (action === "regenerate") {
-		const regenSpinner = createSpinner();
-		regenSpinner.start("Regenerating branch name");
+		if (action === "intent") {
+			const currentIntent = detectBranchIntent(branchName);
+			const newIntent = await promptForIntent(currentIntent);
 
-		branchName = await generateBranchName({ diff });
-		regenSpinner.stop("Branch name regenerated");
+			if (p.isCancel(newIntent)) {
+				continue;
+			}
 
-		branchName = normalizeBranchName(branchName);
+			branchName = replaceBranchIntent(branchName, newIntent as string);
+			branchName = normalizeBranchName(branchName);
+			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
+			continue;
+		}
 
-		p.log.step(`New branch name:\n${color.white(`  "${branchName}"`)}`);
+		if (action === "edit") {
+			const editedName = await p.text({
+				message: "Enter branch name:",
+				initialValue: branchName,
+				validate: (value) => {
+					if (!value.trim()) return "Branch name cannot be empty";
+					if (/\s/.test(value)) return "Branch name cannot contain spaces";
+				},
+			});
 
-		const confirmNew = await p.confirm({
-			message: "Use this name?",
-			initialValue: true,
-		});
+			if (p.isCancel(editedName)) {
+				continue;
+			}
 
-		if (p.isCancel(confirmNew) || !confirmNew) {
-			return null;
+			branchName = normalizeBranchName(editedName);
+			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
+			continue;
+		}
+
+		if (action === "regenerate") {
+			const regenSpinner = createSpinner();
+			regenSpinner.start("Regenerating branch name");
+
+			branchName = await generateBranchName({ diff });
+			regenSpinner.stop("Branch name regenerated");
+
+			branchName = normalizeBranchName(branchName);
+			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
+			continue;
 		}
 	}
-
-	return branchName;
 }
 
 async function ensureUniqueBranchName(

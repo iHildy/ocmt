@@ -11,6 +11,11 @@ import {
 	isGitRepo,
 	stageAll,
 } from "../utils/git";
+import {
+	detectCommitIntent,
+	promptForIntent,
+	replaceCommitIntent,
+} from "../utils/intent";
 import { createSpinner } from "../utils/ui";
 
 export interface CommitOptions {
@@ -140,68 +145,86 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
 	// Confirm commit (unless --yes or --accept)
 	if (!options.yes && !options.accept) {
-		const action = await p.select({
-			message: "What would you like to do?",
-			options: [
-				{ value: "commit", label: "Commit with this message" },
-				{ value: "edit", label: "Edit message" },
-				{ value: "regenerate", label: "Regenerate message" },
-				{ value: "cancel", label: "Cancel" },
-			],
-		});
-
-		if (p.isCancel(action) || action === "cancel") {
-			p.cancel("Aborted");
-			cleanup();
-			process.exit(0);
-		}
-
-		if (action === "edit") {
-			const editedMessage = await p.text({
-				message: "Enter commit message:",
-				initialValue: commitMessage,
-				validate: (value) => {
-					if (!value.trim()) return "Commit message cannot be empty";
-				},
+		let actionLoop = true;
+		while (actionLoop) {
+			const action = await p.select({
+				message: "What would you like to do?",
+				options: [
+					{ value: "commit", label: "Commit with this message" },
+					{ value: "intent", label: "Change intent" },
+					{ value: "edit", label: "Edit message" },
+					{ value: "regenerate", label: "Regenerate message" },
+					{ value: "cancel", label: "Cancel" },
+				],
 			});
 
-			if (p.isCancel(editedMessage)) {
+			if (p.isCancel(action) || action === "cancel") {
 				p.cancel("Aborted");
 				cleanup();
 				process.exit(0);
 			}
 
-			commitMessage = editedMessage;
-		}
+			if (action === "commit") {
+				actionLoop = false;
+				break;
+			}
 
-		if (action === "regenerate") {
-			const s = createSpinner();
-			s.start("Regenerating commit message");
+			if (action === "intent") {
+				const currentIntent = detectCommitIntent(commitMessage);
+				const newIntent = await promptForIntent(currentIntent);
 
-			try {
-				commitMessage = await generateCommitMessage({
-					diff,
-					modelOverride: options.model,
+				if (p.isCancel(newIntent)) {
+					continue;
+				}
+
+				commitMessage = replaceCommitIntent(commitMessage, newIntent as string);
+				p.log.step(
+					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+				);
+				continue;
+			}
+
+			if (action === "edit") {
+				const editedMessage = await p.text({
+					message: "Enter commit message:",
+					initialValue: commitMessage,
+					validate: (value) => {
+						if (!value.trim()) return "Commit message cannot be empty";
+					},
 				});
-				s.stop("Commit message regenerated");
-			} catch (error) {
-				s.stop("Failed to regenerate commit message");
-				p.cancel(error instanceof Error ? error.message : String(error));
-				cleanup();
-				process.exit(1);
+
+				if (p.isCancel(editedMessage)) {
+					continue;
+				}
+
+				commitMessage = editedMessage;
+				p.log.step(
+					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+				);
+				continue;
 			}
 
-			p.log.step(`New commit message:\n${color.white(`  "${commitMessage}"`)}`);
+			if (action === "regenerate") {
+				const s = createSpinner();
+				s.start("Regenerating commit message");
 
-			const confirmNew = await p.confirm({
-				message: "Use this message?",
-				initialValue: true,
-			});
+				try {
+					commitMessage = await generateCommitMessage({
+						diff,
+						modelOverride: options.model,
+					});
+					s.stop("Commit message regenerated");
+				} catch (error) {
+					s.stop("Failed to regenerate commit message");
+					p.cancel(error instanceof Error ? error.message : String(error));
+					cleanup();
+					process.exit(1);
+				}
 
-			if (p.isCancel(confirmNew) || !confirmNew) {
-				p.cancel("Aborted");
-				cleanup();
-				process.exit(0);
+				p.log.step(
+					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+				);
+				continue;
 			}
 		}
 	}
