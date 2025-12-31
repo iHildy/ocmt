@@ -323,10 +323,7 @@ export async function getConfig(): Promise<OcConfig> {
 			config = mergeConfigs(config, globalConfig);
 		} catch (error) {
 			console.warn(
-				"[oc] Warning: Could not parse global config at '" +
-					globalPath +
-					"'. Using defaults. Error: " +
-					(error instanceof Error ? error.message : String(error)),
+				`[oc] Warning: Could not parse global config at '${globalPath}'. Using defaults. Error: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	}
