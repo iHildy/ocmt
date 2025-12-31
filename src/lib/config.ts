@@ -6,6 +6,8 @@ import { git } from "../utils/git";
 const CONFIG_DIR = ".oc";
 const COMMIT_CONFIG_FILE = "config.md";
 const CHANGELOG_CONFIG_FILE = "changelog.md";
+const PR_CONFIG_FILE = "pr.md";
+const BRANCH_CONFIG_FILE = "branch.md";
 const JSON_CONFIG_FILE = "config.json";
 
 // Global config directory in user's home
@@ -227,7 +229,20 @@ How to test the changes (if applicable)
 5. Only return the title and body, no additional explanations
 `;
 
-const PR_CONFIG_FILE = "pr.md";
+const DEFAULT_BRANCH_CONFIG = `# Branch Name Generation Guidelines
+
+Generate a concise git branch name for the provided diff.
+
+## Rules
+
+1. Use lowercase letters
+2. Use hyphens to separate words
+3. Use a prefix like "feat/", "fix/", "docs/", "refactor/", or "chore/"
+4. No spaces, quotes, or markdown
+5. Keep it under 40 characters
+6. Be specific but very concise
+7. Return ONLY the branch name, no explanations, no "Proposed branch name:", no markdown formatting
+`;
 
 async function getRepoRoot(): Promise<string> {
 	const root = await git("rev-parse --show-toplevel");
@@ -271,6 +286,10 @@ export async function getChangelogConfig(): Promise<string> {
 
 export async function getPRConfig(): Promise<string> {
 	return getLayeredTextConfig(PR_CONFIG_FILE, DEFAULT_PR_CONFIG);
+}
+
+export async function getBranchConfig(): Promise<string> {
+	return getLayeredTextConfig(BRANCH_CONFIG_FILE, DEFAULT_BRANCH_CONFIG);
 }
 
 export async function configExists(): Promise<boolean> {
