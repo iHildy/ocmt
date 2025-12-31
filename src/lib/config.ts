@@ -340,10 +340,7 @@ export async function getConfig(): Promise<OcConfig> {
 				config = mergeConfigs(config, projectConfig);
 			} catch (error) {
 				console.warn(
-					"[oc] Warning: Could not parse project config at '" +
-						projectPath +
-						"'. Using global config. Error: " +
-						(error instanceof Error ? error.message : String(error)),
+					`[oc] Warning: Could not parse project config at '${projectPath}'. Using global config. Error: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 		}
