@@ -96,7 +96,7 @@ async function resolveBranchName(
 			});
 
 			if (p.isCancel(editedName)) {
-				return null;
+				continue;
 			}
 
 			branchName = normalizeBranchName(editedName);

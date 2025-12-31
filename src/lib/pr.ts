@@ -280,7 +280,7 @@ async function resolvePRContent(
 			});
 
 			if (p.isCancel(editedTitle)) {
-				return null;
+				continue;
 			}
 
 			const editedBody = await p.text({
@@ -289,7 +289,7 @@ async function resolvePRContent(
 			});
 
 			if (p.isCancel(editedBody)) {
-				return null;
+				continue;
 			}
 
 			prContent = {

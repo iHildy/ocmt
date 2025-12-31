@@ -41,7 +41,7 @@ export function replaceCommitIntent(
 	message: string,
 	newIntent: string,
 ): string {
-	const match = message.match(/^(\w+!?)(\([^)]*\))?:\s*/);
+	const match = message.match(COMMIT_INTENT_REGEX);
 
 	if (match) {
 		const scope = match[2] || "";
@@ -86,9 +86,8 @@ export function replaceBranchIntent(
 export async function promptForIntent(
 	currentIntent?: string | null,
 ): Promise<string | symbol> {
-	const validIntents = INTENT_TYPES.map((t) => t.value);
 	const initialValue =
-		currentIntent && validIntents.includes(currentIntent as IntentType)
+		currentIntent && INTENT_TYPES.some((t) => t.value === currentIntent)
 			? currentIntent
 			: "feat";
 

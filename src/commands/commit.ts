@@ -194,9 +194,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 				});
 
 				if (p.isCancel(editedMessage)) {
-					p.cancel("Aborted");
-					cleanup();
-					process.exit(0);
+					continue;
 				}
 
 				commitMessage = editedMessage;
