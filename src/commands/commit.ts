@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
+import { getConfig } from "../lib/config";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
 import { confirmAction, confirmWithMode } from "../utils/confirm";
@@ -10,6 +11,7 @@ import {
 	getStagedDiff,
 	getStatus,
 	isGitRepo,
+	pushBranch,
 	stageAll,
 } from "../utils/git";
 import {
@@ -265,7 +267,22 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	// Offer to create PR after successful commit
+	const config = await getConfig();
+	if (config.commit?.autoPush) {
+		const pushSpinner = createSpinner();
+		pushSpinner.start("Pushing to remote");
+
+		try {
+			await pushBranch();
+			pushSpinner.stop("Pushed to remote");
+		} catch (error) {
+			pushSpinner.stop("Failed to push");
+			p.log.warn(
+				`Push failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
 	await maybeCreatePRAfterCommit({ yes: options.yes });
 
 	p.outro(color.green("Done!"));

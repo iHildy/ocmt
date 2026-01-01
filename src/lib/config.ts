@@ -52,6 +52,7 @@ export interface OcConfig {
 		autoCreateBranchOnDefault?: boolean;
 		autoCreateBranchOnNonDefault?: boolean;
 		forceNewBranchOnDefault?: boolean;
+		autoPush?: boolean;
 		branchModel?: string; // format: "provider/model"
 		model?: string; // format: "provider/model"
 	};
@@ -90,6 +91,7 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 		autoCreateBranchOnDefault: true,
 		autoCreateBranchOnNonDefault: false,
 		forceNewBranchOnDefault: false,
+		autoPush: false,
 		branchModel: "opencode/gpt-5-nano",
 		model: "opencode/gpt-5-nano",
 	},
