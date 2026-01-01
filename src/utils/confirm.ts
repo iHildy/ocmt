@@ -23,8 +23,7 @@ function sleep(ms: number): Promise<void> {
  * Display AI-generated content and get user confirmation.
  * Behavior depends on execution mode:
  * - auto-accept: Shows content briefly, returns "accept"
- * - confirm-each: Shows content, waits for Enter, returns "accept"
- * - interactive: Returns "interactive" to signal full action loop needed
+ * - confirm-each/interactive: Returns "interactive" to signal full action loop needed
  */
 export async function confirmWithMode(
 	options: ConfirmWithModeOptions,
@@ -42,21 +41,7 @@ export async function confirmWithMode(
 		return "accept";
 	}
 
-	if (isConfirmEachMode()) {
-		// Simple confirmation - press Enter to continue
-		const confirmed = await p.confirm({
-			message: `Accept this ${contentLabel.toLowerCase()}?`,
-			initialValue: true,
-		});
-
-		if (p.isCancel(confirmed) || !confirmed) {
-			return "cancel";
-		}
-
-		return "accept";
-	}
-
-	// Interactive mode - return control to caller for full action loop
+	// Both confirm-each and interactive modes use the full action loop
 	return "interactive";
 }
 
