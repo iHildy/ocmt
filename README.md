@@ -173,6 +173,39 @@ oc --skip-branch
 - `autoCreateBranchOnNonDefault`: Auto-create branch when on non-default branch (default: `false`)
 - `forceNewBranchOnDefault`: Always require new branch on default branch (default: `false`)
 
+### Defaults Mode
+
+When you run any `oc` command, you'll be prompted to choose your interaction style:
+
+```
+◆  How would you like to proceed?
+│  ● Use defaults and approve each (AI generates content, you confirm with Enter)
+│  ○ Use defaults and auto-accept (AI generates content, proceeds automatically)
+│  ○ Don't use defaults (Full interactive mode with all options)
+```
+
+- **Use defaults and approve each**: AI generates content, you press Enter to confirm each step
+- **Use defaults and auto-accept**: AI generates content and proceeds automatically
+- **Don't use defaults**: Full interactive mode with edit, regenerate, and intent change options
+
+To skip this prompt and always use a specific mode, set it in your config file:
+
+```json
+{
+  "defaults": {
+    "executionMode": "confirm-each",
+    "skipModePrompt": true
+  }
+}
+```
+
+Valid values for `executionMode`:
+- `"interactive"` - Full interactive mode
+- `"confirm-each"` - Approve each AI-generated item
+- `"auto-accept"` - Auto-accept all AI-generated content
+
+Use `--interactive` / `-i` to override the saved preference and force interactive mode.
+
 ### Non-Interactive Mode
 
 For CI/CD or scripting, use flags to skip all prompts:
@@ -229,9 +262,18 @@ Configure models, behavior, and preferences:
     "autoPush": false,
     "tagPrefix": "v"
   },
+  "pr": {
+    "autoCreate": false,
+    "autoOpenInBrowser": false,
+    "model": "opencode/gpt-5-nano"
+  },
   "general": {
     "confirmPrompts": true,
     "verbose": false
+  },
+  "defaults": {
+    "executionMode": null,
+    "skipModePrompt": false
   }
 }
 ```
@@ -309,6 +351,15 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 
 ## Options
 
+### Global Options
+
+| Option | Description |
+|--------|-------------|
+| `-i, --interactive` | Force interactive mode (ignore saved defaults preference) |
+| `-s, --silent` | Suppress all CLI updates and animations |
+| `-V, --version` | Show version number |
+| `-h, --help` | Show help |
+
 ### Commit Options
 
 | Option | Description |
@@ -319,8 +370,6 @@ For JSON config, individual fields are deep-merged. For markdown configs (`confi
 | `--accept` | Auto-accept generated message without confirmation |
 | `--branch <name>` | Use specified branch name instead of generating |
 | `--skip-branch` | Skip branch creation entirely |
-| `-V, --version` | Show version number |
-| `-h, --help` | Show help |
 
 ### Changelog Options
 

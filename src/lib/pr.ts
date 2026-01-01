@@ -2,6 +2,7 @@ import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as p from "@clack/prompts";
 import color from "picocolors";
+import { confirmAction, confirmWithMode } from "../utils/confirm";
 import {
 	getCommitsFromBranch,
 	getCurrentBranch,
@@ -18,7 +19,7 @@ import {
 } from "../utils/intent";
 import { getConfig } from "./config";
 import { generatePRContent, type PRContent } from "./opencode";
-import { createSpinner } from "../utils/ui";
+import { createSpinner, isInteractiveMode } from "../utils/ui";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -226,12 +227,31 @@ async function resolvePRContent(
 	}
 
 	if (yes) {
+		p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
+		p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
 		return prContent;
 	}
 
+	// Check mode-aware confirmation (content will be displayed by confirmWithMode)
+	// But for PR we have both title and body, so display them first
 	p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
 	p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
 
+	const confirmResult = await confirmWithMode({
+		content: prContent.title,
+		contentLabel: "PR content",
+		skipDisplay: true, // Already displayed above
+	});
+
+	if (confirmResult === "cancel") {
+		return null;
+	}
+
+	if (confirmResult === "accept") {
+		return prContent;
+	}
+
+	// Interactive mode - full action loop
 	while (true) {
 		const action = await p.select({
 			message: "What would you like to do?",
@@ -391,21 +411,31 @@ export async function createPR(options: PRFlowOptions): Promise<PRFlowResult> {
 	}
 
 	if (!yes) {
-		const action = await p.select({
-			message: "Would you like to create a pull request?",
-			options: [
-				{ value: "auto", label: "Create automatically" },
-				{ value: "browser", label: "Create in browser" },
-				{ value: "skip", label: "Skip" },
-			],
-		});
+		// In non-interactive modes, use config-based default
+		if (!isInteractiveMode()) {
+			const config = await getConfig();
+			if (!config.pr?.autoCreate) {
+				return "skipped";
+			}
+			// autoCreate is true, proceed with auto creation
+		} else {
+			// Interactive mode - show full options
+			const action = await p.select({
+				message: "Would you like to create a pull request?",
+				options: [
+					{ value: "auto", label: "Create automatically" },
+					{ value: "browser", label: "Create in browser" },
+					{ value: "skip", label: "Skip" },
+				],
+			});
 
-		if (p.isCancel(action) || action === "skip") {
-			return "skipped";
-		}
+			if (p.isCancel(action) || action === "skip") {
+				return "skipped";
+			}
 
-		if (action === "browser") {
-			return await handleBrowserPRCreation(currentBranch);
+			if (action === "browser") {
+				return await handleBrowserPRCreation(currentBranch);
+			}
 		}
 	}
 
@@ -561,17 +591,17 @@ async function handleAutoPRCreation(
 	p.log.success(`PR created: ${color.cyan(prUrl)}`);
 
 	// Handle --open flag or config/interactive
-	const shouldOpen =
-		open !== undefined
-			? open
-			: yes
-				? config.pr?.autoOpenInBrowser
-				: await p.confirm({
-						message: "Open PR in browser?",
-						initialValue: true,
-					});
+	let shouldOpen: boolean;
+	if (open !== undefined) {
+		shouldOpen = open;
+	} else if (yes) {
+		shouldOpen = !!config.pr?.autoOpenInBrowser;
+	} else {
+		const confirmOpen = await confirmAction("Open PR in browser?", true);
+		shouldOpen = !!confirmOpen;
+	}
 
-	if (!p.isCancel(shouldOpen) && shouldOpen) {
+	if (shouldOpen) {
 		try {
 			await openInBrowser(prUrl);
 		} catch {

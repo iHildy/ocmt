@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
+import { confirmAction, confirmWithMode } from "../utils/confirm";
 import {
 	branchExists,
 	createBranch,
@@ -46,11 +47,25 @@ async function resolveBranchName(
 	branchName = normalizeBranchName(branchName);
 
 	if (yes) {
+		p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 		return branchName;
 	}
 
-	p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
+	// Check mode-aware confirmation first
+	const confirmResult = await confirmWithMode({
+		content: branchName,
+		contentLabel: "Proposed branch name",
+	});
 
+	if (confirmResult === "cancel") {
+		return null;
+	}
+
+	if (confirmResult === "accept") {
+		return branchName;
+	}
+
+	// Interactive mode - full action loop
 	while (true) {
 		const action = await p.select({
 			message: "What would you like to do?",
@@ -187,16 +202,12 @@ export async function maybeCreateBranchForCommit(
 		const message = isDefaultBranch
 			? `You're on default branch "${currentBranch}". Create a new branch for this commit?`
 			: "Create a new branch for this commit?";
-		const confirm = await p.confirm({
-			message,
-			initialValue: isDefaultBranch ? autoOnDefault : autoOnNonDefault,
-		});
-
-		if (p.isCancel(confirm)) {
+		const defaultValue = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
+		const confirmResult = await confirmAction(message, defaultValue);
+		if (confirmResult === null) {
 			return "abort";
 		}
-
-		shouldCreate = !!confirm;
+		shouldCreate = confirmResult;
 	}
 
 	if (!shouldCreate) {

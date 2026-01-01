@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ExecutionMode } from "../types/mode";
 import { git } from "../utils/git";
 
 const CONFIG_DIR = ".oc";
@@ -51,6 +52,7 @@ export interface OcConfig {
 		autoCreateBranchOnDefault?: boolean;
 		autoCreateBranchOnNonDefault?: boolean;
 		forceNewBranchOnDefault?: boolean;
+		autoPush?: boolean;
 		branchModel?: string; // format: "provider/model"
 		model?: string; // format: "provider/model"
 	};
@@ -74,6 +76,12 @@ export interface OcConfig {
 		verbose?: boolean;
 		silent?: boolean;
 	};
+	defaults?: {
+		/** Persisted execution mode - set when user chooses "Always use..." */
+		executionMode?: ExecutionMode;
+		/** If true, skip the startup mode prompt and use executionMode */
+		skipModePrompt?: boolean;
+	};
 }
 
 const DEFAULT_JSON_CONFIG: OcConfig = {
@@ -83,6 +91,7 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 		autoCreateBranchOnDefault: true,
 		autoCreateBranchOnNonDefault: false,
 		forceNewBranchOnDefault: false,
+		autoPush: false,
 		branchModel: "opencode/gpt-5-nano",
 		model: "opencode/gpt-5-nano",
 	},
@@ -105,6 +114,10 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 		confirmPrompts: true,
 		verbose: false,
 		silent: false,
+	},
+	defaults: {
+		executionMode: undefined,
+		skipModePrompt: false,
 	},
 };
 
@@ -349,4 +362,24 @@ export async function getConfig(): Promise<OcConfig> {
 	}
 
 	return config;
+}
+
+export async function updateGlobalConfig(
+	updates: Partial<OcConfig>,
+): Promise<void> {
+	const globalDir = ensureGlobalConfigDir();
+	const globalPath = join(globalDir, JSON_CONFIG_FILE);
+
+	let existing: OcConfig = {};
+	if (existsSync(globalPath)) {
+		try {
+			const content = readFileSync(globalPath, "utf-8");
+			existing = JSON.parse(content) as OcConfig;
+		} catch {
+			// Use empty if parse fails
+		}
+	}
+
+	const merged = mergeConfigs(existing, updates);
+	writeFileSync(globalPath, JSON.stringify(merged, null, 2), "utf-8");
 }

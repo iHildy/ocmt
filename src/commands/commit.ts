@@ -1,14 +1,17 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
+import { getConfig } from "../lib/config";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
+import { confirmAction, confirmWithMode } from "../utils/confirm";
 import {
 	commit,
 	type GitStatus,
 	getStagedDiff,
 	getStatus,
 	isGitRepo,
+	pushBranch,
 	stageAll,
 } from "../utils/git";
 import {
@@ -67,12 +70,9 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		p.log.info(`Unstaged/Untracked files:\n${unstagedFiles}`);
 
 		if (!options.yes) {
-			const shouldStage = await p.confirm({
-				message: "Stage all changes?",
-				initialValue: true,
-			});
+			const shouldStage = await confirmAction("Stage all changes?", true);
 
-			if (p.isCancel(shouldStage) || !shouldStage) {
+			if (shouldStage === null || !shouldStage) {
 				p.cancel("Aborted. Stage changes with `git add` first.");
 				cleanup();
 				process.exit(0);
@@ -138,95 +138,113 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		}
 	}
 
-	// Show the commit message
-	p.log.step(
-		`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-	);
-
 	// Confirm commit (unless --yes or --accept)
 	if (!options.yes && !options.accept) {
-		let actionLoop = true;
-		while (actionLoop) {
-			const action = await p.select({
-				message: "What would you like to do?",
-				options: [
-					{ value: "commit", label: "Commit with this message" },
-					{ value: "intent", label: "Change intent" },
-					{ value: "edit", label: "Edit message" },
-					{ value: "regenerate", label: "Regenerate message" },
-					{ value: "cancel", label: "Cancel" },
-				],
-			});
+		// Check mode-aware confirmation first
+		const confirmResult = await confirmWithMode({
+			content: commitMessage,
+			contentLabel: "Proposed commit message",
+		});
 
-			if (p.isCancel(action) || action === "cancel") {
-				p.cancel("Aborted");
-				cleanup();
-				process.exit(0);
-			}
+		if (confirmResult === "cancel") {
+			p.cancel("Aborted");
+			cleanup();
+			process.exit(0);
+		}
 
-			if (action === "commit") {
-				actionLoop = false;
-				break;
-			}
-
-			if (action === "intent") {
-				const currentIntent = detectCommitIntent(commitMessage);
-				const newIntent = await promptForIntent(currentIntent);
-
-				if (p.isCancel(newIntent)) {
-					continue;
-				}
-
-				commitMessage = replaceCommitIntent(commitMessage, newIntent as string);
-				p.log.step(
-					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-				);
-				continue;
-			}
-
-			if (action === "edit") {
-				const editedMessage = await p.text({
-					message: "Enter commit message:",
-					initialValue: commitMessage,
-					validate: (value) => {
-						if (!value.trim()) return "Commit message cannot be empty";
-					},
+		// Only enter full action loop if mode returned "interactive"
+		if (confirmResult === "interactive") {
+			let actionLoop = true;
+			while (actionLoop) {
+				const action = await p.select({
+					message: "What would you like to do?",
+					options: [
+						{ value: "commit", label: "Commit with this message" },
+						{ value: "intent", label: "Change intent" },
+						{ value: "edit", label: "Edit message" },
+						{ value: "regenerate", label: "Regenerate message" },
+						{ value: "cancel", label: "Cancel" },
+					],
 				});
 
-				if (p.isCancel(editedMessage)) {
+				if (p.isCancel(action) || action === "cancel") {
+					p.cancel("Aborted");
+					cleanup();
+					process.exit(0);
+				}
+
+				if (action === "commit") {
+					actionLoop = false;
+					break;
+				}
+
+				if (action === "intent") {
+					const currentIntent = detectCommitIntent(commitMessage);
+					const newIntent = await promptForIntent(currentIntent);
+
+					if (p.isCancel(newIntent)) {
+						continue;
+					}
+
+					commitMessage = replaceCommitIntent(
+						commitMessage,
+						newIntent as string,
+					);
+					p.log.step(
+						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+					);
 					continue;
 				}
 
-				commitMessage = editedMessage;
-				p.log.step(
-					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-				);
-				continue;
-			}
-
-			if (action === "regenerate") {
-				const s = createSpinner();
-				s.start("Regenerating commit message");
-
-				try {
-					commitMessage = await generateCommitMessage({
-						diff,
-						modelOverride: options.model,
+				if (action === "edit") {
+					const editedMessage = await p.text({
+						message: "Enter commit message:",
+						initialValue: commitMessage,
+						validate: (value) => {
+							if (!value.trim()) return "Commit message cannot be empty";
+						},
 					});
-					s.stop("Commit message regenerated");
-				} catch (error) {
-					s.stop("Failed to regenerate commit message");
-					p.cancel(error instanceof Error ? error.message : String(error));
-					cleanup();
-					process.exit(1);
+
+					if (p.isCancel(editedMessage)) {
+						continue;
+					}
+
+					commitMessage = editedMessage;
+					p.log.step(
+						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+					);
+					continue;
 				}
 
-				p.log.step(
-					`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-				);
-				continue;
+				if (action === "regenerate") {
+					const s = createSpinner();
+					s.start("Regenerating commit message");
+
+					try {
+						commitMessage = await generateCommitMessage({
+							diff,
+							modelOverride: options.model,
+						});
+						s.stop("Commit message regenerated");
+					} catch (error) {
+						s.stop("Failed to regenerate commit message");
+						p.cancel(error instanceof Error ? error.message : String(error));
+						cleanup();
+						process.exit(1);
+					}
+
+					p.log.step(
+						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+					);
+					continue;
+				}
 			}
 		}
+	} else {
+		// Show the commit message when using --yes or --accept
+		p.log.step(
+			`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
+		);
 	}
 
 	// Perform the commit
@@ -249,7 +267,22 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	// Offer to create PR after successful commit
+	const config = await getConfig();
+	if (config.commit?.autoPush) {
+		const pushSpinner = createSpinner();
+		pushSpinner.start("Pushing to remote");
+
+		try {
+			await pushBranch();
+			pushSpinner.stop("Pushed to remote");
+		} catch (error) {
+			pushSpinner.stop("Failed to push");
+			p.log.warn(
+				`Push failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
 	await maybeCreatePRAfterCommit({ yes: options.yes });
 
 	p.outro(color.green("Done!"));
