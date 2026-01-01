@@ -13,6 +13,11 @@ import {
 	replaceBranchIntent,
 } from "../utils/intent";
 import { getConfig } from "./config";
+import {
+	getAiEditedOutputsContext,
+	recordAiEditedOutput,
+	recordAiEditedOutputSession,
+} from "./ai-edits";
 import { generateBranchName } from "./opencode";
 import { createSpinner } from "../utils/ui";
 
@@ -41,10 +46,23 @@ async function resolveBranchName(
 	const s = createSpinner();
 	s.start("Generating branch name");
 
-	let branchName = await generateBranchName({ diff });
+	const context = await getAiEditedOutputsContext("branch");
+
+	let branchName = await generateBranchName({ diff, context });
 	s.stop("Branch name generated");
 
 	branchName = normalizeBranchName(branchName);
+	let originalBranchName = branchName;
+	let wasEdited = false;
+
+	const recordBranchEdit = (edited: string) => {
+		wasEdited = true;
+		recordAiEditedOutputSession({
+			kind: "branch-name",
+			generated: originalBranchName,
+			edited,
+		});
+	};
 
 	if (yes) {
 		p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
@@ -83,6 +101,13 @@ async function resolveBranchName(
 		}
 
 		if (action === "create") {
+			if (wasEdited && branchName.trim() !== originalBranchName.trim()) {
+				await recordAiEditedOutput({
+					kind: "branch-name",
+					generated: originalBranchName,
+					edited: branchName,
+				});
+			}
 			return branchName;
 		}
 
@@ -96,6 +121,7 @@ async function resolveBranchName(
 
 			branchName = replaceBranchIntent(branchName, newIntent as string);
 			branchName = normalizeBranchName(branchName);
+			recordBranchEdit(branchName);
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 			continue;
 		}
@@ -115,6 +141,7 @@ async function resolveBranchName(
 			}
 
 			branchName = normalizeBranchName(editedName);
+			recordBranchEdit(branchName);
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 			continue;
 		}
@@ -123,12 +150,13 @@ async function resolveBranchName(
 			const regenSpinner = createSpinner();
 			regenSpinner.start("Regenerating branch name");
 
-			branchName = await generateBranchName({ diff });
+			branchName = await generateBranchName({ diff, context });
 			regenSpinner.stop("Branch name regenerated");
 
 			branchName = normalizeBranchName(branchName);
+			originalBranchName = branchName;
+			wasEdited = false;
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-			continue;
 		}
 	}
 }

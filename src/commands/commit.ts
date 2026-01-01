@@ -2,6 +2,11 @@ import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
 import { getConfig } from "../lib/config";
+import {
+	getAiEditedOutputsContext,
+	recordAiEditedOutput,
+	recordAiEditedOutputSession,
+} from "../lib/ai-edits";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
 import { confirmAction, confirmWithMode } from "../utils/confirm";
@@ -118,18 +123,36 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
 	// If message provided, use it directly
 	let commitMessage = options.message;
+	let originalCommitMessage: string | null = null;
+	let wasEdited = false;
+
+	const recordCommitEdit = (edited: string) => {
+		if (originalCommitMessage) {
+			wasEdited = true;
+			recordAiEditedOutputSession({
+				kind: "commit-message",
+				generated: originalCommitMessage,
+				edited,
+			});
+		}
+	};
 
 	if (!commitMessage) {
 		// Generate commit message using AI
 		const s = createSpinner();
 		s.start("Generating commit message");
 
+		const context = await getAiEditedOutputsContext("commit");
+
 		try {
 			commitMessage = await generateCommitMessage({
 				diff,
+				context,
 				modelOverride: options.model,
 			});
 			s.stop("Commit message generated");
+			originalCommitMessage = commitMessage;
+			wasEdited = false;
 		} catch (error) {
 			s.stop("Failed to generate commit message");
 			p.cancel(error instanceof Error ? error.message : String(error));
@@ -174,6 +197,17 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 				}
 
 				if (action === "commit") {
+					if (
+						originalCommitMessage &&
+						wasEdited &&
+						commitMessage.trim() !== originalCommitMessage.trim()
+					) {
+						await recordAiEditedOutput({
+							kind: "commit-message",
+							generated: originalCommitMessage,
+							edited: commitMessage,
+						});
+					}
 					actionLoop = false;
 					break;
 				}
@@ -190,6 +224,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 						commitMessage,
 						newIntent as string,
 					);
+					recordCommitEdit(commitMessage);
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);
@@ -210,6 +245,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 					}
 
 					commitMessage = editedMessage;
+					recordCommitEdit(commitMessage);
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);
@@ -220,12 +256,17 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 					const s = createSpinner();
 					s.start("Regenerating commit message");
 
+					const context = await getAiEditedOutputsContext("commit");
+
 					try {
 						commitMessage = await generateCommitMessage({
 							diff,
+							context,
 							modelOverride: options.model,
 						});
 						s.stop("Commit message regenerated");
+						originalCommitMessage = commitMessage;
+						wasEdited = false;
 					} catch (error) {
 						s.stop("Failed to regenerate commit message");
 						p.cancel(error instanceof Error ? error.message : String(error));
@@ -236,7 +277,6 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);
-					continue;
 				}
 			}
 		}

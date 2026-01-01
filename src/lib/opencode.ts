@@ -114,6 +114,7 @@ export interface PRGenerationOptions {
 	commits: Array<{ hash: string; message: string }>;
 	targetBranch: string;
 	sourceBranch: string;
+	context?: string;
 }
 
 export interface PRContent {
@@ -418,7 +419,7 @@ function parsePRContent(response: string): PRContent {
 export async function generatePRContent(
 	options: PRGenerationOptions,
 ): Promise<PRContent> {
-	const { diff, commits, targetBranch, sourceBranch } = options;
+	const { diff, commits, targetBranch, sourceBranch, context } = options;
 
 	const systemPrompt = await getPRConfig();
 	const prModel = await getPRModel();
@@ -436,6 +437,10 @@ export async function generatePRContent(
 	}
 
 	prompt += `## Diff\n\n\`\`\`diff\n${diff}\n\`\`\``;
+
+	if (context) {
+		prompt += `\n\nAdditional context:\n${context}`;
+	}
 
 	const { message, close } = await runOpencodePrompt({
 		title: "oc-pr",

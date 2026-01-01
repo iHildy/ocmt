@@ -18,6 +18,11 @@ import {
 	replaceCommitIntent,
 } from "../utils/intent";
 import { getConfig } from "./config";
+import {
+	getAiEditedOutputsContext,
+	recordAiEditedOutput,
+	recordAiEditedOutputSession,
+} from "./ai-edits";
 import { generatePRContent, type PRContent } from "./opencode";
 import { createSpinner, isInteractiveMode } from "../utils/ui";
 
@@ -212,6 +217,8 @@ async function resolvePRContent(
 	const s = createSpinner();
 	s.start("Generating PR title and description");
 
+	const context = await getAiEditedOutputsContext("pr");
+
 	let prContent: PRContent;
 	try {
 		prContent = await generatePRContent({
@@ -219,12 +226,35 @@ async function resolvePRContent(
 			commits,
 			sourceBranch,
 			targetBranch,
+			context,
 		});
 		s.stop("PR content generated");
 	} catch (error) {
 		s.stop("Failed to generate PR content");
 		throw error;
 	}
+
+	let originalTitle = prContent.title;
+	let originalBody = prContent.body;
+	let wasEdited = false;
+
+	const recordPREdit = (title: string, body: string) => {
+		wasEdited = true;
+		if (title.trim() !== originalTitle.trim()) {
+			recordAiEditedOutputSession({
+				kind: "pr-title",
+				generated: originalTitle,
+				edited: title,
+			});
+		}
+		if (body.trim() !== originalBody.trim()) {
+			recordAiEditedOutputSession({
+				kind: "pr-body",
+				generated: originalBody,
+				edited: body,
+			});
+		}
+	};
 
 	if (yes) {
 		p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
@@ -269,6 +299,22 @@ async function resolvePRContent(
 		}
 
 		if (action === "create") {
+			if (wasEdited) {
+				if (prContent.title.trim() !== originalTitle.trim()) {
+					await recordAiEditedOutput({
+						kind: "pr-title",
+						generated: originalTitle,
+						edited: prContent.title,
+					});
+				}
+				if (prContent.body.trim() !== originalBody.trim()) {
+					await recordAiEditedOutput({
+						kind: "pr-body",
+						generated: originalBody,
+						edited: prContent.body,
+					});
+				}
+			}
 			return prContent;
 		}
 
@@ -284,9 +330,11 @@ async function resolvePRContent(
 				prContent.title,
 				newIntent as string,
 			);
+			recordPREdit(prContent.title, prContent.body);
 			p.log.step(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
 			);
+			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
 			continue;
 		}
 
@@ -316,6 +364,8 @@ async function resolvePRContent(
 				title: editedTitle,
 				body: editedBody || "",
 			};
+			recordPREdit(prContent.title, prContent.body);
+
 			p.log.step(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
 			);
@@ -333,8 +383,12 @@ async function resolvePRContent(
 					commits,
 					sourceBranch,
 					targetBranch,
+					context,
 				});
 				regenSpinner.stop("PR content regenerated");
+				originalTitle = prContent.title;
+				originalBody = prContent.body;
+				wasEdited = false;
 			} catch (error) {
 				regenSpinner.stop("Failed to regenerate PR content");
 				throw error;
@@ -344,7 +398,6 @@ async function resolvePRContent(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
 			);
 			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-			continue;
 		}
 	}
 }
