@@ -3,6 +3,7 @@ import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { maybeCreateBranchForCommit } from "../lib/branch";
+import { getAiEditedOutputsContext } from "../lib/ai-edits";
 import { addHistoryEntry } from "../lib/history";
 import {
 	cleanup,
@@ -192,7 +193,8 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 				const genSpinner = createSpinner();
 				genSpinner.start("Generating commit message");
 
-				const commitMessage = await generateCommitMessage({ diff });
+				const context = await getAiEditedOutputsContext("commit");
+				const commitMessage = await generateCommitMessage({ diff, context });
 				genSpinner.stop("Commit message generated");
 
 				p.log.info(`Commit message: ${color.cyan(`"${commitMessage}"`)}`);
