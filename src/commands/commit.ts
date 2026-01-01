@@ -126,6 +126,17 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 	let originalCommitMessage: string | null = null;
 	let wasEdited = false;
 
+	const recordCommitEdit = (edited: string) => {
+		if (originalCommitMessage) {
+			wasEdited = true;
+			recordAiEditedOutputSession({
+				kind: "commit-message",
+				generated: originalCommitMessage,
+				edited,
+			});
+		}
+	};
+
 	if (!commitMessage) {
 		// Generate commit message using AI
 		const s = createSpinner();
@@ -213,14 +224,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 						commitMessage,
 						newIntent as string,
 					);
-					if (originalCommitMessage) {
-						wasEdited = true;
-						recordAiEditedOutputSession({
-							kind: "commit-message",
-							generated: originalCommitMessage,
-							edited: commitMessage,
-						});
-					}
+					recordCommitEdit(commitMessage);
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);
@@ -241,14 +245,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 					}
 
 					commitMessage = editedMessage;
-					if (originalCommitMessage) {
-						wasEdited = true;
-						recordAiEditedOutputSession({
-							kind: "commit-message",
-							generated: originalCommitMessage,
-							edited: commitMessage,
-						});
-					}
+					recordCommitEdit(commitMessage);
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);

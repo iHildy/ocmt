@@ -238,6 +238,24 @@ async function resolvePRContent(
 	let originalBody = prContent.body;
 	let wasEdited = false;
 
+	const recordPREdit = (title: string, body: string) => {
+		wasEdited = true;
+		if (title.trim() !== originalTitle.trim()) {
+			recordAiEditedOutputSession({
+				kind: "pr-title",
+				generated: originalTitle,
+				edited: title,
+			});
+		}
+		if (body.trim() !== originalBody.trim()) {
+			recordAiEditedOutputSession({
+				kind: "pr-body",
+				generated: originalBody,
+				edited: body,
+			});
+		}
+	};
+
 	if (yes) {
 		p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
 		p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
@@ -312,12 +330,7 @@ async function resolvePRContent(
 				prContent.title,
 				newIntent as string,
 			);
-			wasEdited = true;
-			recordAiEditedOutputSession({
-				kind: "pr-title",
-				generated: originalTitle,
-				edited: prContent.title,
-			});
+			recordPREdit(prContent.title, prContent.body);
 			p.log.step(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
 			);
@@ -351,22 +364,7 @@ async function resolvePRContent(
 				title: editedTitle,
 				body: editedBody || "",
 			};
-			wasEdited = true;
-
-			if (prContent.title.trim() !== originalTitle.trim()) {
-				recordAiEditedOutputSession({
-					kind: "pr-title",
-					generated: originalTitle,
-					edited: prContent.title,
-				});
-			}
-			if (prContent.body.trim() !== originalBody.trim()) {
-				recordAiEditedOutputSession({
-					kind: "pr-body",
-					generated: originalBody,
-					edited: prContent.body,
-				});
-			}
+			recordPREdit(prContent.title, prContent.body);
 
 			p.log.step(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,

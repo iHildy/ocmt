@@ -55,6 +55,15 @@ async function resolveBranchName(
 	let originalBranchName = branchName;
 	let wasEdited = false;
 
+	const recordBranchEdit = (edited: string) => {
+		wasEdited = true;
+		recordAiEditedOutputSession({
+			kind: "branch-name",
+			generated: originalBranchName,
+			edited,
+		});
+	};
+
 	if (yes) {
 		p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 		return branchName;
@@ -112,12 +121,7 @@ async function resolveBranchName(
 
 			branchName = replaceBranchIntent(branchName, newIntent as string);
 			branchName = normalizeBranchName(branchName);
-			wasEdited = true;
-			recordAiEditedOutputSession({
-				kind: "branch-name",
-				generated: originalBranchName,
-				edited: branchName,
-			});
+			recordBranchEdit(branchName);
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 			continue;
 		}
@@ -137,12 +141,7 @@ async function resolveBranchName(
 			}
 
 			branchName = normalizeBranchName(editedName);
-			wasEdited = true;
-			recordAiEditedOutputSession({
-				kind: "branch-name",
-				generated: originalBranchName,
-				edited: branchName,
-			});
+			recordBranchEdit(branchName);
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
 			continue;
 		}

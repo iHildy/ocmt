@@ -76,14 +76,26 @@ export interface RecordAiEditedOutputOptions {
 	edited: string;
 }
 
-export function recordAiEditedOutputSession(
+function validateEdits(
 	options: RecordAiEditedOutputOptions,
-): void {
+): { generated: string; edited: string } | null {
 	const generated = options.generated.trim();
 	const edited = options.edited.trim();
 	if (!generated || !edited || generated === edited) {
+		return null;
+	}
+	return { generated, edited };
+}
+
+export function recordAiEditedOutputSession(
+	options: RecordAiEditedOutputOptions,
+): void {
+	const validated = validateEdits(options);
+	if (!validated) {
 		return;
 	}
+
+	const { generated, edited } = validated;
 
 	const last = sessionEntries[0];
 	if (
@@ -113,11 +125,12 @@ export async function recordAiEditedOutput(
 	try {
 		recordAiEditedOutputSession(options);
 
-		const generated = options.generated.trim();
-		const edited = options.edited.trim();
-		if (!generated || !edited || generated === edited) {
+		const validated = validateEdits(options);
+		if (!validated) {
 			return;
 		}
+
+		const { generated, edited } = validated;
 
 		const history = await loadHistory();
 
