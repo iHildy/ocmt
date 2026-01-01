@@ -177,7 +177,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 				`Staged changes:\n${stagedPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`,
 			);
 
-			let diff: string | null = await getStagedDiff();
+			const diff: string | null = await getStagedDiff();
 
 			if (diff) {
 				const branchFlow = await maybeCreateBranchForCommit({

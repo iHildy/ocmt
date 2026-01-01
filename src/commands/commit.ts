@@ -277,7 +277,6 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 					p.log.step(
 						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
 					);
-					continue;
 				}
 			}
 		}

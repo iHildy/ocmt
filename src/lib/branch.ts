@@ -157,7 +157,6 @@ async function resolveBranchName(
 			originalBranchName = branchName;
 			wasEdited = false;
 			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-			continue;
 		}
 	}
 }

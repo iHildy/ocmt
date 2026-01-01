@@ -398,7 +398,6 @@ async function resolvePRContent(
 				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
 			);
 			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-			continue;
 		}
 	}
 }
