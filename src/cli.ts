@@ -5,6 +5,7 @@ import { changelogCommand } from "./commands/changelog";
 import { commitCommand } from "./commands/commit";
 import { prCommand } from "./commands/pr";
 import { releaseCommand } from "./commands/release";
+import { initializeExecutionMode } from "./lib/defaults";
 import { setSilentMode } from "./utils/ui";
 
 const program = new Command();
@@ -14,7 +15,11 @@ program
 	.description("AI-powered git commit message generator using opencode.ai")
 	.version("1.0.0")
 	.option("-s, --silent", "Suppress all CLI updates and animations")
-	.hook("preAction", async (thisCommand) => {
+	.option(
+		"-i, --interactive",
+		"Force interactive mode (ignore saved preferences)",
+	)
+	.hook("preAction", async (thisCommand, actionCommand) => {
 		const opts = thisCommand.opts();
 		if (opts.silent) {
 			setSilentMode(true);
@@ -23,6 +28,20 @@ program
 		if (opts.changelog || opts.cl) {
 			await changelogCommand({});
 			process.exit(0);
+		}
+
+		// Initialize execution mode (skip for help commands)
+		const commandName = actionCommand?.name() || "default";
+		if (!["help", "--help", "-h"].includes(commandName)) {
+			const actionOpts = actionCommand?.opts() || {};
+			const success = await initializeExecutionMode({
+				interactive: opts.interactive,
+				yes: actionOpts.yes,
+			});
+
+			if (!success) {
+				process.exit(0); // User cancelled mode selection
+			}
 		}
 	});
 

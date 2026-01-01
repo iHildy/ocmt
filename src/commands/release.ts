@@ -10,6 +10,7 @@ import {
 	generateCommitMessage,
 	updateChangelogFile,
 } from "../lib/opencode";
+import { confirmAction } from "../utils/confirm";
 import {
 	commit,
 	detectVersionBump,
@@ -148,12 +149,9 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 						`Unstaged changes:\n${filesPreview}${moreCount > 0 ? `\n  ${color.dim(`...and ${moreCount} more`)}` : ""}`,
 					);
 
-					const shouldStage = await p.confirm({
-						message: "Stage all changes?",
-						initialValue: true,
-					});
+					const shouldStage = await confirmAction("Stage all changes?", true);
 
-					if (p.isCancel(shouldStage) || !shouldStage) {
+					if (!shouldStage) {
 						p.cancel("Aborted. Stage changes first with `git add`");
 						cleanup();
 						process.exit(0);
@@ -200,12 +198,12 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 				p.log.info(`Commit message: ${color.cyan(`"${commitMessage}"`)}`);
 
 				if (!options.yes) {
-					const confirmCommit = await p.confirm({
-						message: "Commit with this message?",
-						initialValue: true,
-					});
+					const confirmCommit = await confirmAction(
+						"Commit with this message?",
+						true,
+					);
 
-					if (p.isCancel(confirmCommit) || !confirmCommit) {
+					if (!confirmCommit) {
 						p.cancel("Aborted");
 						cleanup();
 						process.exit(0);
@@ -351,17 +349,10 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 			let shouldTag = options.tag ?? true; // Default to true for release
 
 			if (!options.yes && !options.tag) {
-				const tagConfirm = await p.confirm({
-					message: `Create tag ${color.cyan(tagName)}?`,
-					initialValue: true,
-				});
-
-				if (p.isCancel(tagConfirm)) {
-					p.cancel("Aborted");
-					cleanup();
-					process.exit(0);
-				}
-				shouldTag = tagConfirm;
+				shouldTag = await confirmAction(
+					`Create tag ${color.cyan(tagName)}?`,
+					true,
+				);
 			}
 
 			if (shouldTag) {
@@ -377,14 +368,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 					let shouldPush = options.push ?? false;
 
 					if (!options.yes && !options.push) {
-						const pushConfirm = await p.confirm({
-							message: "Push to remote with tags?",
-							initialValue: true,
-						});
-
-						if (!p.isCancel(pushConfirm)) {
-							shouldPush = pushConfirm;
-						}
+						shouldPush = await confirmAction("Push to remote with tags?", true);
 					}
 
 					if (shouldPush) {

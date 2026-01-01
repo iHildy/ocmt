@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
+import { confirmAction } from "../utils/confirm";
 import {
 	addHistoryEntry,
 	formatHistoryEntry,
@@ -20,7 +21,7 @@ import {
 	git,
 	isGitRepo,
 } from "../utils/git";
-import { createSpinner } from "../utils/ui";
+import { createSpinner, isInteractiveMode } from "../utils/ui";
 
 export interface ChangelogOptions {
 	from?: string;
@@ -376,6 +377,29 @@ export async function changelogCommand(
 
 				if (options.copy) {
 					await handleCopyAction(changelog);
+				}
+
+				p.outro(color.green("Done!"));
+				cleanup();
+				process.exit(0);
+			}
+
+			// In defaults mode, use config-based behavior (auto-save)
+			if (!isInteractiveMode()) {
+				const saveLabel = changelogFileExists
+					? "update CHANGELOG.md"
+					: "create CHANGELOG.md";
+				const shouldSave = await confirmAction(`Save to ${saveLabel}?`, true);
+
+				if (shouldSave) {
+					await handleSaveAction({
+						changelog,
+						changelogFileExists,
+						options,
+						fromRef,
+						toRef,
+						commitCount: commits.length,
+					});
 				}
 
 				p.outro(color.green("Done!"));
