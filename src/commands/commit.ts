@@ -72,7 +72,7 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 		if (!options.yes) {
 			const shouldStage = await confirmAction("Stage all changes?", true);
 
-			if (!shouldStage) {
+			if (shouldStage === null || !shouldStage) {
 				p.cancel("Aborted. Stage changes with `git add` first.");
 				cleanup();
 				process.exit(0);

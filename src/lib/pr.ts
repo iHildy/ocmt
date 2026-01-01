@@ -597,7 +597,8 @@ async function handleAutoPRCreation(
 	} else if (yes) {
 		shouldOpen = !!config.pr?.autoOpenInBrowser;
 	} else {
-		shouldOpen = await confirmAction("Open PR in browser?", true);
+		const confirmOpen = await confirmAction("Open PR in browser?", true);
+		shouldOpen = !!confirmOpen;
 	}
 
 	if (shouldOpen) {

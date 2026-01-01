@@ -63,11 +63,12 @@ export async function confirmWithMode(
 /**
  * Wrapper for simple yes/no confirmations that respects mode.
  * In auto-accept and confirm-each modes, returns the default value.
+ * Returns null on cancellation.
  */
 export async function confirmAction(
 	message: string,
 	defaultValue = true,
-): Promise<boolean> {
+): Promise<boolean | null> {
 	if (isAutoAcceptMode() || isConfirmEachMode()) {
 		return defaultValue;
 	}
@@ -78,7 +79,7 @@ export async function confirmAction(
 	});
 
 	if (p.isCancel(result)) {
-		return false;
+		return null;
 	}
 
 	return result;

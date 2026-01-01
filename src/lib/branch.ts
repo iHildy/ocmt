@@ -203,7 +203,11 @@ export async function maybeCreateBranchForCommit(
 			? `You're on default branch "${currentBranch}". Create a new branch for this commit?`
 			: "Create a new branch for this commit?";
 		const defaultValue = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
-		shouldCreate = await confirmAction(message, defaultValue);
+		const confirmResult = await confirmAction(message, defaultValue);
+		if (confirmResult === null) {
+			return "abort";
+		}
+		shouldCreate = confirmResult;
 	}
 
 	if (!shouldCreate) {

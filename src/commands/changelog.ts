@@ -391,6 +391,12 @@ export async function changelogCommand(
 					: "create CHANGELOG.md";
 				const shouldSave = await confirmAction(`Save to ${saveLabel}?`, true);
 
+				if (shouldSave === null) {
+					p.cancel("Aborted");
+					cleanup();
+					process.exit(0);
+				}
+
 				if (shouldSave) {
 					await handleSaveAction({
 						changelog,

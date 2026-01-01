@@ -151,8 +151,8 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 
 					const shouldStage = await confirmAction("Stage all changes?", true);
 
-					if (!shouldStage) {
-						p.cancel("Aborted. Stage changes first with `git add`");
+					if (shouldStage === null || !shouldStage) {
+						p.cancel("Aborted. Stage changes first with `git add` ");
 						cleanup();
 						process.exit(0);
 					}
@@ -203,7 +203,7 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 						true,
 					);
 
-					if (!confirmCommit) {
+					if (confirmCommit === null || !confirmCommit) {
 						p.cancel("Aborted");
 						cleanup();
 						process.exit(0);
@@ -349,10 +349,16 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 			let shouldTag = options.tag ?? true; // Default to true for release
 
 			if (!options.yes && !options.tag) {
-				shouldTag = await confirmAction(
+				const confirmTag = await confirmAction(
 					`Create tag ${color.cyan(tagName)}?`,
 					true,
 				);
+				if (confirmTag === null) {
+					p.cancel("Aborted");
+					cleanup();
+					process.exit(0);
+				}
+				shouldTag = confirmTag;
 			}
 
 			if (shouldTag) {
@@ -368,7 +374,16 @@ export async function releaseCommand(options: ReleaseOptions): Promise<void> {
 					let shouldPush = options.push ?? false;
 
 					if (!options.yes && !options.push) {
-						shouldPush = await confirmAction("Push to remote with tags?", true);
+						const confirmPush = await confirmAction(
+							"Push to remote with tags?",
+							true,
+						);
+						if (confirmPush === null) {
+							p.cancel("Aborted");
+							cleanup();
+							process.exit(0);
+						}
+						shouldPush = confirmPush;
 					}
 
 					if (shouldPush) {
