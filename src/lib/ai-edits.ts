@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { git } from "../utils/git";
 
 const CONFIG_DIR = ".oc";
@@ -30,26 +32,31 @@ async function getRepoRoot(): Promise<string> {
 	return git("rev-parse --show-toplevel");
 }
 
-async function ensureConfigDir(): Promise<string> {
-	const repoRoot = await getRepoRoot();
-	const configDir = join(repoRoot, CONFIG_DIR);
-
-	if (!existsSync(configDir)) {
-		mkdirSync(configDir, { recursive: true });
-	}
-
-	return configDir;
-}
-
-async function getHistoryPath(): Promise<string> {
+async function getLocalHistoryPath(): Promise<string> {
 	const repoRoot = await getRepoRoot();
 	return join(repoRoot, CONFIG_DIR, HISTORY_FILE);
 }
 
+async function getGlobalHistoryPath(): Promise<string> {
+	const repoRoot = await getRepoRoot();
+	const hash = createHash("sha256").update(repoRoot).digest("hex");
+	return join(homedir(), ".ocmt", "oc", "ai-edits", `${hash}.json`);
+}
+
 async function loadHistory(): Promise<AiEditedOutputHistory> {
 	try {
-		const historyPath = await getHistoryPath();
-		if (!existsSync(historyPath)) {
+		const globalPath = await getGlobalHistoryPath();
+		const localPath = await getLocalHistoryPath();
+
+		let historyPath: string | undefined;
+
+		if (existsSync(globalPath)) {
+			historyPath = globalPath;
+		} else if (existsSync(localPath)) {
+			historyPath = localPath;
+		}
+
+		if (!historyPath) {
 			return { entries: [] };
 		}
 
@@ -65,8 +72,13 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 }
 
 async function saveHistory(history: AiEditedOutputHistory): Promise<void> {
-	await ensureConfigDir();
-	const historyPath = await getHistoryPath();
+	const historyPath = await getGlobalHistoryPath();
+	const historyDir = dirname(historyPath);
+
+	if (!existsSync(historyDir)) {
+		mkdirSync(historyDir, { recursive: true });
+	}
+
 	writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
 }
 
