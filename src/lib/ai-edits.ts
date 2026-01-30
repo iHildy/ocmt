@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { git } from "../utils/git";
@@ -63,19 +63,8 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 		const globalPath = await getGlobalHistoryPath();
 		const localPath = await getLocalHistoryPath();
 
-		let historyPath: string | undefined;
-
-		if (storage === "global") {
-			if (existsSync(globalPath)) {
-				historyPath = globalPath;
-			} else if (existsSync(localPath)) {
-				historyPath = localPath;
-			}
-		} else {
-			if (existsSync(localPath)) {
-				historyPath = localPath;
-			}
-		}
+		const pathsToCheck = storage === "global" ? [globalPath, localPath] : [localPath];
+		const historyPath = pathsToCheck.find((path) => existsSync(path));
 
 		if (!historyPath) {
 			return { entries: [] };
@@ -95,20 +84,30 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 async function saveHistory(history: AiEditedOutputHistory): Promise<void> {
 	const config = await getConfig();
 	const storage = config.aiEdits?.storage || "local";
+	let historyPath: string;
 
 	if (storage === "global") {
-		const historyPath = await getGlobalHistoryPath();
+		historyPath = await getGlobalHistoryPath();
 		const historyDir = dirname(historyPath);
-
 		if (!existsSync(historyDir)) {
 			mkdirSync(historyDir, { recursive: true });
 		}
-
-		writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
 	} else {
 		await ensureConfigDir();
-		const historyPath = await getLocalHistoryPath();
-		writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
+		historyPath = await getLocalHistoryPath();
+	}
+
+	writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
+
+	if (storage === "global") {
+		try {
+			const localPath = await getLocalHistoryPath();
+			if (existsSync(localPath)) {
+				unlinkSync(localPath);
+			}
+		} catch {
+			// Non-critical, ignore error.
+		}
 	}
 }
 
