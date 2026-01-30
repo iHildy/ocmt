@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { git } from "../utils/git";
@@ -33,8 +39,7 @@ async function getRepoRoot(): Promise<string> {
 	return git("rev-parse --show-toplevel");
 }
 
-async function ensureConfigDir(): Promise<string> {
-	const repoRoot = await getRepoRoot();
+async function ensureConfigDir(repoRoot: string): Promise<string> {
 	const configDir = join(repoRoot, CONFIG_DIR);
 
 	if (!existsSync(configDir)) {
@@ -44,13 +49,11 @@ async function ensureConfigDir(): Promise<string> {
 	return configDir;
 }
 
-async function getLocalHistoryPath(): Promise<string> {
-	const repoRoot = await getRepoRoot();
+async function getLocalHistoryPath(repoRoot: string): Promise<string> {
 	return join(repoRoot, CONFIG_DIR, HISTORY_FILE);
 }
 
-async function getGlobalHistoryPath(): Promise<string> {
-	const repoRoot = await getRepoRoot();
+async function getGlobalHistoryPath(repoRoot: string): Promise<string> {
 	const hash = createHash("sha256").update(repoRoot).digest("hex");
 	return join(homedir(), ".ocmt", "oc", "ai-edits", `${hash}.json`);
 }
@@ -60,10 +63,12 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 		const config = await getConfig();
 		const storage = config.aiEdits?.storage || "local";
 
-		const globalPath = await getGlobalHistoryPath();
-		const localPath = await getLocalHistoryPath();
+		const repoRoot = await getRepoRoot();
+		const globalPath = await getGlobalHistoryPath(repoRoot);
+		const localPath = await getLocalHistoryPath(repoRoot);
 
-		const pathsToCheck = storage === "global" ? [globalPath, localPath] : [localPath];
+		const pathsToCheck =
+			storage === "global" ? [globalPath, localPath] : [localPath];
 		const historyPath = pathsToCheck.find((path) => existsSync(path));
 
 		if (!historyPath) {
@@ -84,24 +89,25 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 async function saveHistory(history: AiEditedOutputHistory): Promise<void> {
 	const config = await getConfig();
 	const storage = config.aiEdits?.storage || "local";
+	const repoRoot = await getRepoRoot();
 	let historyPath: string;
 
 	if (storage === "global") {
-		historyPath = await getGlobalHistoryPath();
+		historyPath = await getGlobalHistoryPath(repoRoot);
 		const historyDir = dirname(historyPath);
 		if (!existsSync(historyDir)) {
 			mkdirSync(historyDir, { recursive: true });
 		}
 	} else {
-		await ensureConfigDir();
-		historyPath = await getLocalHistoryPath();
+		await ensureConfigDir(repoRoot);
+		historyPath = await getLocalHistoryPath(repoRoot);
 	}
 
 	writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
 
 	if (storage === "global") {
 		try {
-			const localPath = await getLocalHistoryPath();
+			const localPath = await getLocalHistoryPath(repoRoot);
 			if (existsSync(localPath)) {
 				unlinkSync(localPath);
 			}
