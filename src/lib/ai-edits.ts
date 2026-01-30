@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { git } from "../utils/git";
+import { getConfig } from "./config";
 
 const CONFIG_DIR = ".oc";
 const HISTORY_FILE = "ai.edits.json";
@@ -32,6 +33,17 @@ async function getRepoRoot(): Promise<string> {
 	return git("rev-parse --show-toplevel");
 }
 
+async function ensureConfigDir(): Promise<string> {
+	const repoRoot = await getRepoRoot();
+	const configDir = join(repoRoot, CONFIG_DIR);
+
+	if (!existsSync(configDir)) {
+		mkdirSync(configDir, { recursive: true });
+	}
+
+	return configDir;
+}
+
 async function getLocalHistoryPath(): Promise<string> {
 	const repoRoot = await getRepoRoot();
 	return join(repoRoot, CONFIG_DIR, HISTORY_FILE);
@@ -45,15 +57,24 @@ async function getGlobalHistoryPath(): Promise<string> {
 
 async function loadHistory(): Promise<AiEditedOutputHistory> {
 	try {
+		const config = await getConfig();
+		const storage = config.aiEdits?.storage || "local";
+
 		const globalPath = await getGlobalHistoryPath();
 		const localPath = await getLocalHistoryPath();
 
 		let historyPath: string | undefined;
 
-		if (existsSync(globalPath)) {
-			historyPath = globalPath;
-		} else if (existsSync(localPath)) {
-			historyPath = localPath;
+		if (storage === "global") {
+			if (existsSync(globalPath)) {
+				historyPath = globalPath;
+			} else if (existsSync(localPath)) {
+				historyPath = localPath;
+			}
+		} else {
+			if (existsSync(localPath)) {
+				historyPath = localPath;
+			}
 		}
 
 		if (!historyPath) {
@@ -72,14 +93,23 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 }
 
 async function saveHistory(history: AiEditedOutputHistory): Promise<void> {
-	const historyPath = await getGlobalHistoryPath();
-	const historyDir = dirname(historyPath);
+	const config = await getConfig();
+	const storage = config.aiEdits?.storage || "local";
 
-	if (!existsSync(historyDir)) {
-		mkdirSync(historyDir, { recursive: true });
+	if (storage === "global") {
+		const historyPath = await getGlobalHistoryPath();
+		const historyDir = dirname(historyPath);
+
+		if (!existsSync(historyDir)) {
+			mkdirSync(historyDir, { recursive: true });
+		}
+
+		writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
+	} else {
+		await ensureConfigDir();
+		const historyPath = await getLocalHistoryPath();
+		writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
 	}
-
-	writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
 }
 
 export interface RecordAiEditedOutputOptions {
