@@ -197,9 +197,8 @@ export async function maybeCreateBranchForCommit(
 	} else if (yes) {
 		shouldCreate = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
 	} else {
-		const message = isDefaultBranch
-			? `You're on default branch "${currentBranch}". Create a new branch for this commit?`
-			: "Create a new branch for this commit?";
+		const branchInfo = color.white(`"${currentBranch}"`) + (isDefaultBranch ? ` ${color.dim("(default)")}` : "");
+		const message = `Create a new branch for this commit?\n${color.white("  Current branch: ")}${branchInfo}`;
 		const defaultValue = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
 		const confirmResult = await confirmAction(message, defaultValue);
 		if (confirmResult === null) {
