@@ -82,6 +82,9 @@ export interface OcConfig {
 		/** If true, skip the startup mode prompt and use executionMode */
 		skipModePrompt?: boolean;
 	};
+	aiEdits?: {
+		storage?: "local" | "global";
+	};
 }
 
 const DEFAULT_JSON_CONFIG: OcConfig = {
@@ -118,6 +121,9 @@ const DEFAULT_JSON_CONFIG: OcConfig = {
 	defaults: {
 		executionMode: undefined,
 		skipModePrompt: false,
+	},
+	aiEdits: {
+		storage: "local",
 	},
 };
 

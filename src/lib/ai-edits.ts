@@ -1,6 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { git } from "../utils/git";
+import { getConfig } from "./config";
 
 const CONFIG_DIR = ".oc";
 const HISTORY_FILE = "ai.edits.json";
@@ -30,8 +39,7 @@ async function getRepoRoot(): Promise<string> {
 	return git("rev-parse --show-toplevel");
 }
 
-async function ensureConfigDir(): Promise<string> {
-	const repoRoot = await getRepoRoot();
+async function ensureConfigDir(repoRoot: string): Promise<string> {
 	const configDir = join(repoRoot, CONFIG_DIR);
 
 	if (!existsSync(configDir)) {
@@ -41,15 +49,29 @@ async function ensureConfigDir(): Promise<string> {
 	return configDir;
 }
 
-async function getHistoryPath(): Promise<string> {
-	const repoRoot = await getRepoRoot();
+async function getLocalHistoryPath(repoRoot: string): Promise<string> {
 	return join(repoRoot, CONFIG_DIR, HISTORY_FILE);
+}
+
+async function getGlobalHistoryPath(repoRoot: string): Promise<string> {
+	const hash = createHash("sha256").update(repoRoot).digest("hex");
+	return join(homedir(), ".ocmt", "oc", "ai-edits", `${hash}.json`);
 }
 
 async function loadHistory(): Promise<AiEditedOutputHistory> {
 	try {
-		const historyPath = await getHistoryPath();
-		if (!existsSync(historyPath)) {
+		const config = await getConfig();
+		const storage = config.aiEdits?.storage || "local";
+
+		const repoRoot = await getRepoRoot();
+		const globalPath = await getGlobalHistoryPath(repoRoot);
+		const localPath = await getLocalHistoryPath(repoRoot);
+
+		const pathsToCheck =
+			storage === "global" ? [globalPath, localPath] : [localPath];
+		const historyPath = pathsToCheck.find((path) => existsSync(path));
+
+		if (!historyPath) {
 			return { entries: [] };
 		}
 
@@ -65,9 +87,34 @@ async function loadHistory(): Promise<AiEditedOutputHistory> {
 }
 
 async function saveHistory(history: AiEditedOutputHistory): Promise<void> {
-	await ensureConfigDir();
-	const historyPath = await getHistoryPath();
+	const config = await getConfig();
+	const storage = config.aiEdits?.storage || "local";
+	const repoRoot = await getRepoRoot();
+	let historyPath: string;
+
+	if (storage === "global") {
+		historyPath = await getGlobalHistoryPath(repoRoot);
+		const historyDir = dirname(historyPath);
+		if (!existsSync(historyDir)) {
+			mkdirSync(historyDir, { recursive: true });
+		}
+	} else {
+		await ensureConfigDir(repoRoot);
+		historyPath = await getLocalHistoryPath(repoRoot);
+	}
+
 	writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
+
+	if (storage === "global") {
+		try {
+			const localPath = await getLocalHistoryPath(repoRoot);
+			if (existsSync(localPath)) {
+				unlinkSync(localPath);
+			}
+		} catch {
+			// Non-critical, ignore error.
+		}
+	}
 }
 
 export interface RecordAiEditedOutputOptions {
