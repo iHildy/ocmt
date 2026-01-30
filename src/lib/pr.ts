@@ -2,7 +2,7 @@ import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { confirmAction, confirmWithMode } from "../utils/confirm";
+import { confirmAction } from "../utils/confirm";
 import {
 	getCommitsFromBranch,
 	getCurrentBranch,
@@ -25,6 +25,7 @@ import {
 } from "./ai-edits";
 import { generatePRContent, type PRContent } from "./opencode";
 import { createSpinner, isInteractiveMode } from "../utils/ui";
+import { interactiveContentLoop } from "../utils/interactive-content";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -236,10 +237,8 @@ async function resolvePRContent(
 
 	let originalTitle = prContent.title;
 	let originalBody = prContent.body;
-	let wasEdited = false;
 
 	const recordPREdit = (title: string, body: string) => {
-		wasEdited = true;
 		if (title.trim() !== originalTitle.trim()) {
 			recordAiEditedOutputSession({
 				kind: "pr-title",
@@ -256,129 +255,64 @@ async function resolvePRContent(
 		}
 	};
 
-	if (yes) {
-		p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
-		p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-		return prContent;
-	}
-
-	// Check mode-aware confirmation (content will be displayed by confirmWithMode)
-	// But for PR we have both title and body, so display them first
-	p.log.step(`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`);
-	p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-
-	const confirmResult = await confirmWithMode({
-		content: prContent.title,
+	const result = await interactiveContentLoop({
+		content: prContent,
 		contentLabel: "PR content",
-		skipDisplay: true, // Already displayed above
-	});
-
-	if (confirmResult === "cancel") {
-		return null;
-	}
-
-	if (confirmResult === "accept") {
-		return prContent;
-	}
-
-	// Interactive mode - full action loop
-	while (true) {
-		const action = await p.select({
-			message: "What would you like to do?",
-			options: [
-				{ value: "create", label: "Create PR with this content" },
-				{ value: "intent", label: "Change intent" },
-				{ value: "edit", label: "Edit content" },
-				{ value: "regenerate", label: "Regenerate content" },
-				{ value: "cancel", label: "Cancel" },
-			],
-		});
-
-		if (p.isCancel(action) || action === "cancel") {
-			return null;
-		}
-
-		if (action === "create") {
-			if (wasEdited) {
-				if (prContent.title.trim() !== originalTitle.trim()) {
-					await recordAiEditedOutput({
-						kind: "pr-title",
-						generated: originalTitle,
-						edited: prContent.title,
-					});
-				}
-				if (prContent.body.trim() !== originalBody.trim()) {
-					await recordAiEditedOutput({
-						kind: "pr-body",
-						generated: originalBody,
-						edited: prContent.body,
-					});
-				}
-			}
-			return prContent;
-		}
-
-		if (action === "intent") {
-			const currentIntent = detectCommitIntent(prContent.title);
+		confirmContent: prContent.title,
+		displayContent: (content) => {
+			p.log.step(`Proposed PR title:\n${color.white(`  "${content.title}"`)}`);
+			p.log.step(`Proposed PR body:\n${color.dim(content.body)}`);
+		},
+		onIntent: async (current) => {
+			const currentIntent = detectCommitIntent(current.title);
 			const newIntent = await promptForIntent(currentIntent);
 
 			if (p.isCancel(newIntent)) {
-				continue;
+				return null;
 			}
 
-			prContent.title = replaceCommitIntent(
-				prContent.title,
-				newIntent as string,
-			);
-			recordPREdit(prContent.title, prContent.body);
-			p.log.step(
-				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
-			);
-			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-			continue;
-		}
-
-		if (action === "edit") {
+			const updated = {
+				...current,
+				title: replaceCommitIntent(current.title, newIntent as string),
+			};
+			recordPREdit(updated.title, updated.body);
+			return updated;
+		},
+		onEdit: async (current) => {
 			const editedTitle = await p.text({
 				message: "Enter PR title:",
-				initialValue: prContent.title,
+				initialValue: current.title,
 				validate: (value) => {
 					if (!value.trim()) return "PR title cannot be empty";
 				},
 			});
 
 			if (p.isCancel(editedTitle)) {
-				continue;
+				return null;
 			}
 
 			const editedBody = await p.text({
 				message: "Enter PR body:",
-				initialValue: prContent.body,
+				initialValue: current.body,
 			});
 
 			if (p.isCancel(editedBody)) {
-				continue;
+				return null;
 			}
 
-			prContent = {
+			const updated = {
 				title: editedTitle,
 				body: editedBody || "",
 			};
-			recordPREdit(prContent.title, prContent.body);
-
-			p.log.step(
-				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
-			);
-			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-			continue;
-		}
-
-		if (action === "regenerate") {
+			recordPREdit(updated.title, updated.body);
+			return updated;
+		},
+		onRegenerate: async () => {
 			const regenSpinner = createSpinner();
 			regenSpinner.start("Regenerating PR content");
 
 			try {
-				prContent = await generatePRContent({
+				const regenerated = await generatePRContent({
 					diff,
 					commits,
 					sourceBranch,
@@ -386,20 +320,41 @@ async function resolvePRContent(
 					context,
 				});
 				regenSpinner.stop("PR content regenerated");
-				originalTitle = prContent.title;
-				originalBody = prContent.body;
-				wasEdited = false;
+				originalTitle = regenerated.title;
+				originalBody = regenerated.body;
+				return regenerated;
 			} catch (error) {
 				regenSpinner.stop("Failed to regenerate PR content");
 				throw error;
 			}
+		},
+		trackEdit: async (_generated, edited) => {
+			if (edited.title.trim() !== originalTitle.trim()) {
+				await recordAiEditedOutput({
+					kind: "pr-title",
+					generated: originalTitle,
+					edited: edited.title,
+				});
+			}
+			if (edited.body.trim() !== originalBody.trim()) {
+				await recordAiEditedOutput({
+					kind: "pr-body",
+					generated: originalBody,
+					edited: edited.body,
+				});
+			}
+		},
+		primaryActionLabel: "Create PR with this content",
+		editLabel: "Edit content",
+		regenerateLabel: "Regenerate content",
+		yes,
+	});
 
-			p.log.step(
-				`Proposed PR title:\n${color.white(`  "${prContent.title}"`)}`,
-			);
-			p.log.step(`Proposed PR body:\n${color.dim(prContent.body)}`);
-		}
+	if (result === "skip") {
+		return null;
 	}
+
+	return result;
 }
 
 async function ensureBranchPushed(): Promise<boolean> {

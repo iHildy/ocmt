@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { confirmAction, confirmWithMode } from "../utils/confirm";
+import { confirmAction } from "../utils/confirm";
 import {
 	branchExists,
 	createBranch,
@@ -20,6 +20,7 @@ import {
 } from "./ai-edits";
 import { generateBranchName } from "./opencode";
 import { createSpinner } from "../utils/ui";
+import { interactiveContentLoop } from "../utils/interactive-content";
 
 export type BranchFlowResult = "continue" | "abort";
 
@@ -42,7 +43,7 @@ function normalizeBranchName(name: string): string {
 async function resolveBranchName(
 	diff: string,
 	yes?: boolean,
-): Promise<string | null> {
+): Promise<string | null | "skip"> {
 	const s = createSpinner();
 	s.start("Generating branch name");
 
@@ -53,10 +54,8 @@ async function resolveBranchName(
 
 	branchName = normalizeBranchName(branchName);
 	let originalBranchName = branchName;
-	let wasEdited = false;
 
 	const recordBranchEdit = (edited: string) => {
-		wasEdited = true;
 		recordAiEditedOutputSession({
 			kind: "branch-name",
 			generated: originalBranchName,
@@ -64,72 +63,16 @@ async function resolveBranchName(
 		});
 	};
 
-	if (yes) {
-		p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-		return branchName;
-	}
-
-	// Check mode-aware confirmation first
-	const confirmResult = await confirmWithMode({
+	const result = await interactiveContentLoop({
 		content: branchName,
 		contentLabel: "Proposed branch name",
-	});
-
-	if (confirmResult === "cancel") {
-		return null;
-	}
-
-	if (confirmResult === "accept") {
-		return branchName;
-	}
-
-	// Interactive mode - full action loop
-	while (true) {
-		const action = await p.select({
-			message: "What would you like to do?",
-			options: [
-				{ value: "create", label: "Create branch with this name" },
-				{ value: "intent", label: "Change intent" },
-				{ value: "edit", label: "Edit name" },
-				{ value: "regenerate", label: "Regenerate name" },
-				{ value: "cancel", label: "Cancel" },
-			],
-		});
-
-		if (p.isCancel(action) || action === "cancel") {
-			return null;
-		}
-
-		if (action === "create") {
-			if (wasEdited && branchName.trim() !== originalBranchName.trim()) {
-				await recordAiEditedOutput({
-					kind: "branch-name",
-					generated: originalBranchName,
-					edited: branchName,
-				});
-			}
-			return branchName;
-		}
-
-		if (action === "intent") {
-			const currentIntent = detectBranchIntent(branchName);
-			const newIntent = await promptForIntent(currentIntent);
-
-			if (p.isCancel(newIntent)) {
-				continue;
-			}
-
-			branchName = replaceBranchIntent(branchName, newIntent as string);
-			branchName = normalizeBranchName(branchName);
-			recordBranchEdit(branchName);
-			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-			continue;
-		}
-
-		if (action === "edit") {
+		displayContent: (name) => {
+			p.log.step(`Proposed branch name:\n${color.white(`  "${name}"`)}`);
+		},
+		onEdit: async (current) => {
 			const editedName = await p.text({
 				message: "Enter branch name:",
-				initialValue: branchName,
+				initialValue: current,
 				validate: (value) => {
 					if (!value.trim()) return "Branch name cannot be empty";
 					if (/\s/.test(value)) return "Branch name cannot contain spaces";
@@ -137,28 +80,55 @@ async function resolveBranchName(
 			});
 
 			if (p.isCancel(editedName)) {
-				continue;
+				return null;
 			}
 
-			branchName = normalizeBranchName(editedName);
-			recordBranchEdit(branchName);
-			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-			continue;
-		}
+			const normalized = normalizeBranchName(editedName);
+			recordBranchEdit(normalized);
+			return normalized;
+		},
+		onIntent: async (current) => {
+			const currentIntent = detectBranchIntent(current);
+			const newIntent = await promptForIntent(currentIntent);
 
-		if (action === "regenerate") {
+			if (p.isCancel(newIntent)) {
+				return null;
+			}
+
+			const updated = normalizeBranchName(
+				replaceBranchIntent(current, newIntent as string),
+			);
+			recordBranchEdit(updated);
+			return updated;
+		},
+		onRegenerate: async () => {
 			const regenSpinner = createSpinner();
 			regenSpinner.start("Regenerating branch name");
 
-			branchName = await generateBranchName({ diff, context });
+			const regenerated = await generateBranchName({ diff, context });
 			regenSpinner.stop("Branch name regenerated");
 
-			branchName = normalizeBranchName(branchName);
-			originalBranchName = branchName;
-			wasEdited = false;
-			p.log.step(`Proposed branch name:\n${color.white(`  "${branchName}"`)}`);
-		}
-	}
+			const normalized = normalizeBranchName(regenerated);
+			originalBranchName = normalized;
+			return normalized;
+		},
+		trackEdit: async (generated, edited) => {
+			if (edited.trim() !== generated.trim()) {
+				await recordAiEditedOutput({
+					kind: "branch-name",
+					generated,
+					edited,
+				});
+			}
+		},
+		primaryActionLabel: "Create branch with this name",
+		skipLabel: "Skip new branch",
+		editLabel: "Edit name",
+		regenerateLabel: "Regenerate name",
+		yes,
+	});
+
+	return result;
 }
 
 async function ensureUniqueBranchName(
@@ -243,7 +213,7 @@ export async function maybeCreateBranchForCommit(
 	}
 
 	// Use provided branch name or generate one
-	let branchName: string | null = null;
+	let branchName: string | null | "skip" = null;
 	if (providedBranchName) {
 		branchName = normalizeBranchName(providedBranchName);
 	} else {
@@ -255,6 +225,9 @@ export async function maybeCreateBranchForCommit(
 		}
 	}
 	if (!branchName) return "abort";
+	if (branchName === "skip") {
+		return "continue";
+	}
 
 	branchName = await ensureUniqueBranchName(branchName, yes);
 	if (!branchName) return "abort";

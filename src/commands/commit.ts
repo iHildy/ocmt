@@ -9,7 +9,7 @@ import {
 } from "../lib/ai-edits";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
-import { confirmAction, confirmWithMode } from "../utils/confirm";
+import { confirmAction } from "../utils/confirm";
 import {
 	commit,
 	type GitStatus,
@@ -25,6 +25,7 @@ import {
 	replaceCommitIntent,
 } from "../utils/intent";
 import { createSpinner } from "../utils/ui";
+import { interactiveContentLoop } from "../utils/interactive-content";
 
 export interface CommitOptions {
 	message?: string;
@@ -124,11 +125,9 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 	// If message provided, use it directly
 	let commitMessage = options.message;
 	let originalCommitMessage: string | null = null;
-	let wasEdited = false;
 
 	const recordCommitEdit = (edited: string) => {
 		if (originalCommitMessage) {
-			wasEdited = true;
 			recordAiEditedOutputSession({
 				kind: "commit-message",
 				generated: originalCommitMessage,
@@ -152,7 +151,6 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 			});
 			s.stop("Commit message generated");
 			originalCommitMessage = commitMessage;
-			wasEdited = false;
 		} catch (error) {
 			s.stop("Failed to generate commit message");
 			p.cancel(error instanceof Error ? error.message : String(error));
@@ -163,123 +161,94 @@ export async function commitCommand(options: CommitOptions): Promise<void> {
 
 	// Confirm commit (unless --yes or --accept)
 	if (!options.yes && !options.accept) {
-		// Check mode-aware confirmation first
-		const confirmResult = await confirmWithMode({
+		const result = await interactiveContentLoop({
 			content: commitMessage,
 			contentLabel: "Proposed commit message",
+			displayContent: (message) => {
+				p.log.step(
+					`Proposed commit message:\n${color.white(`  "${message}"`)}`,
+				);
+			},
+			onEdit: async (current) => {
+				const editedMessage = await p.text({
+					message: "Enter commit message:",
+					initialValue: current,
+					validate: (value) => {
+						if (!value.trim()) return "Commit message cannot be empty";
+					},
+				});
+
+				if (p.isCancel(editedMessage)) {
+					return null;
+				}
+
+				recordCommitEdit(editedMessage);
+				return editedMessage;
+			},
+			onIntent: async (current) => {
+				const currentIntent = detectCommitIntent(current);
+				const newIntent = await promptForIntent(currentIntent);
+
+				if (p.isCancel(newIntent)) {
+					return null;
+				}
+
+				const updated = replaceCommitIntent(current, newIntent as string);
+				recordCommitEdit(updated);
+				return updated;
+			},
+			onRegenerate: async () => {
+				const s = createSpinner();
+				s.start("Regenerating commit message");
+
+				const context = await getAiEditedOutputsContext("commit");
+
+				try {
+					const regenerated = await generateCommitMessage({
+						diff,
+						context,
+						modelOverride: options.model,
+					});
+					s.stop("Commit message regenerated");
+					originalCommitMessage = regenerated;
+					return regenerated;
+				} catch (error) {
+					s.stop("Failed to regenerate commit message");
+					p.cancel(error instanceof Error ? error.message : String(error));
+					cleanup();
+					process.exit(1);
+				}
+			},
+			trackEdit: async (generated, edited) => {
+				if (!originalCommitMessage) {
+					return;
+				}
+				if (edited.trim() !== generated.trim()) {
+					await recordAiEditedOutput({
+						kind: "commit-message",
+						generated,
+						edited,
+					});
+				}
+			},
+			primaryActionLabel: "Commit with this message",
+			skipLabel: "Skip commit",
+			editLabel: "Edit message",
+			regenerateLabel: "Regenerate message",
 		});
 
-		if (confirmResult === "cancel") {
+		if (result === null) {
 			p.cancel("Aborted");
 			cleanup();
 			process.exit(0);
 		}
 
-		// Only enter full action loop if mode returned "interactive"
-		if (confirmResult === "interactive") {
-			let actionLoop = true;
-			while (actionLoop) {
-				const action = await p.select({
-					message: "What would you like to do?",
-					options: [
-						{ value: "commit", label: "Commit with this message" },
-						{ value: "intent", label: "Change intent" },
-						{ value: "edit", label: "Edit message" },
-						{ value: "regenerate", label: "Regenerate message" },
-						{ value: "cancel", label: "Cancel" },
-					],
-				});
-
-				if (p.isCancel(action) || action === "cancel") {
-					p.cancel("Aborted");
-					cleanup();
-					process.exit(0);
-				}
-
-				if (action === "commit") {
-					if (
-						originalCommitMessage &&
-						wasEdited &&
-						commitMessage.trim() !== originalCommitMessage.trim()
-					) {
-						await recordAiEditedOutput({
-							kind: "commit-message",
-							generated: originalCommitMessage,
-							edited: commitMessage,
-						});
-					}
-					actionLoop = false;
-					break;
-				}
-
-				if (action === "intent") {
-					const currentIntent = detectCommitIntent(commitMessage);
-					const newIntent = await promptForIntent(currentIntent);
-
-					if (p.isCancel(newIntent)) {
-						continue;
-					}
-
-					commitMessage = replaceCommitIntent(
-						commitMessage,
-						newIntent as string,
-					);
-					recordCommitEdit(commitMessage);
-					p.log.step(
-						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-					);
-					continue;
-				}
-
-				if (action === "edit") {
-					const editedMessage = await p.text({
-						message: "Enter commit message:",
-						initialValue: commitMessage,
-						validate: (value) => {
-							if (!value.trim()) return "Commit message cannot be empty";
-						},
-					});
-
-					if (p.isCancel(editedMessage)) {
-						continue;
-					}
-
-					commitMessage = editedMessage;
-					recordCommitEdit(commitMessage);
-					p.log.step(
-						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-					);
-					continue;
-				}
-
-				if (action === "regenerate") {
-					const s = createSpinner();
-					s.start("Regenerating commit message");
-
-					const context = await getAiEditedOutputsContext("commit");
-
-					try {
-						commitMessage = await generateCommitMessage({
-							diff,
-							context,
-							modelOverride: options.model,
-						});
-						s.stop("Commit message regenerated");
-						originalCommitMessage = commitMessage;
-						wasEdited = false;
-					} catch (error) {
-						s.stop("Failed to regenerate commit message");
-						p.cancel(error instanceof Error ? error.message : String(error));
-						cleanup();
-						process.exit(1);
-					}
-
-					p.log.step(
-						`Proposed commit message:\n${color.white(`  "${commitMessage}"`)}`,
-					);
-				}
-			}
+		if (result === "skip") {
+			cleanup();
+			process.exit(0);
 		}
+
+		commitMessage = result;
 	} else {
 		// Show the commit message when using --yes or --accept
 		p.log.step(
