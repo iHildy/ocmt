@@ -26,6 +26,7 @@ import {
 import { generatePRContent, type PRContent } from "./opencode";
 import { createSpinner, isInteractiveMode } from "../utils/ui";
 import { interactiveContentLoop } from "../utils/interactive-content";
+import { openEditor } from "../utils/editor";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -291,12 +292,11 @@ async function resolvePRContent(
 				return null;
 			}
 
-			const editedBody = await p.text({
-				message: "Enter PR body:",
-				initialValue: current.body,
-			});
+			p.log.info("Opening editor for PR body...");
+			const editedBody = await openEditor(current.body);
 
-			if (p.isCancel(editedBody)) {
+			if (editedBody === null) {
+				p.log.warn("Editor exited without saving or with an error");
 				return null;
 			}
 
