@@ -2,8 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { maybeCreateBranchForCommit } from "../lib/branch";
 import { getAiEditedOutputsContext } from "../lib/ai-edits";
+import { maybeCreateBranchForCommit } from "../lib/branch";
 import { addHistoryEntry } from "../lib/history";
 import {
 	cleanup,

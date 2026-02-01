@@ -2,9 +2,9 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as p from "@clack/prompts";
 import {
+	type AssistantMessage,
 	createOpencode,
 	createOpencodeClient,
-	type AssistantMessage,
 	type OpencodeClient,
 	type Part,
 	type TextPart,

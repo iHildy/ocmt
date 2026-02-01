@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import type { ExecutionMode } from "../types/mode";
-import { getConfig } from "./config";
 import { setExecutionMode } from "../utils/ui";
+import { getConfig } from "./config";
 
 /**
  * Prompt user to select execution mode at startup.

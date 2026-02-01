@@ -1,12 +1,12 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { maybeCreateBranchForCommit } from "../lib/branch";
-import { getConfig } from "../lib/config";
 import {
 	getAiEditedOutputsContext,
 	recordAiEditedOutput,
 	recordAiEditedOutputSession,
 } from "../lib/ai-edits";
+import { maybeCreateBranchForCommit } from "../lib/branch";
+import { getConfig } from "../lib/config";
 import { cleanup, generateCommitMessage } from "../lib/opencode";
 import { maybeCreatePRAfterCommit } from "../lib/pr";
 import { confirmAction } from "../utils/confirm";
@@ -24,8 +24,8 @@ import {
 	promptForIntent,
 	replaceCommitIntent,
 } from "../utils/intent";
-import { createSpinner } from "../utils/ui";
 import { interactiveContentLoop } from "../utils/interactive-content";
+import { createSpinner } from "../utils/ui";
 
 export interface CommitOptions {
 	message?: string;

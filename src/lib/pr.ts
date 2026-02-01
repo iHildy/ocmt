@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { confirmAction } from "../utils/confirm";
+import { editWithEditor } from "../utils/editor";
 import {
 	getCommitsFromBranch,
 	getCurrentBranch,
@@ -17,15 +18,15 @@ import {
 	promptForIntent,
 	replaceCommitIntent,
 } from "../utils/intent";
-import { getConfig } from "./config";
+import { interactiveContentLoop } from "../utils/interactive-content";
+import { createSpinner, isInteractiveMode } from "../utils/ui";
 import {
 	getAiEditedOutputsContext,
 	recordAiEditedOutput,
 	recordAiEditedOutputSession,
 } from "./ai-edits";
+import { getConfig } from "./config";
 import { generatePRContent, type PRContent } from "./opencode";
-import { createSpinner, isInteractiveMode } from "../utils/ui";
-import { interactiveContentLoop } from "../utils/interactive-content";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -291,12 +292,11 @@ async function resolvePRContent(
 				return null;
 			}
 
-			const editedBody = await p.text({
-				message: "Enter PR body:",
-				initialValue: current.body,
-			});
+			p.log.info("Opening editor to edit PR body...");
+			const editedBody = await editWithEditor(current.body);
 
-			if (p.isCancel(editedBody)) {
+			if (editedBody === null) {
+				p.log.error("Failed to edit PR body.");
 				return null;
 			}
 

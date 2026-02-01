@@ -2,7 +2,6 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { confirmAction } from "../utils/confirm";
 import {
 	addHistoryEntry,
 	formatHistoryEntry,
@@ -13,6 +12,7 @@ import {
 	generateChangelog,
 	updateChangelogFile,
 } from "../lib/opencode";
+import { confirmAction } from "../utils/confirm";
 import {
 	detectVersionBump,
 	getCommitsBetween,

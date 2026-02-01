@@ -12,15 +12,15 @@ import {
 	promptForIntent,
 	replaceBranchIntent,
 } from "../utils/intent";
-import { getConfig } from "./config";
+import { interactiveContentLoop } from "../utils/interactive-content";
+import { createSpinner } from "../utils/ui";
 import {
 	getAiEditedOutputsContext,
 	recordAiEditedOutput,
 	recordAiEditedOutputSession,
 } from "./ai-edits";
+import { getConfig } from "./config";
 import { generateBranchName } from "./opencode";
-import { createSpinner } from "../utils/ui";
-import { interactiveContentLoop } from "../utils/interactive-content";
 
 export type BranchFlowResult = "continue" | "abort";
 
@@ -197,7 +197,9 @@ export async function maybeCreateBranchForCommit(
 	} else if (yes) {
 		shouldCreate = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
 	} else {
-		const branchInfo = color.white(`"${currentBranch}"`) + (isDefaultBranch ? ` ${color.dim("(default)")}` : "");
+		const branchInfo =
+			color.white(`"${currentBranch}"`) +
+			(isDefaultBranch ? ` ${color.dim("(default)")}` : "");
 		const message = `Create a new branch for this commit?\n${color.white("  Current branch: ")}${branchInfo}`;
 		const defaultValue = isDefaultBranch ? autoOnDefault : autoOnNonDefault;
 		const confirmResult = await confirmAction(message, defaultValue);

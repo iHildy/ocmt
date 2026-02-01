@@ -26,9 +26,7 @@ export async function interactiveContentLoop<T>(
 ): Promise<ActionLoopResult<T>> {
 	const confirmContent =
 		config.confirmContent ??
-		(typeof config.content === "string"
-			? config.content
-			: config.contentLabel);
+		(typeof config.content === "string" ? config.content : config.contentLabel);
 	const shouldDisplay = !config.skipInitialDisplay;
 
 	if (shouldDisplay) {
@@ -126,7 +124,6 @@ export async function interactiveContentLoop<T>(
 			generated = current;
 			wasEdited = false;
 			config.displayContent(current);
-			continue;
 		}
 	}
 }
