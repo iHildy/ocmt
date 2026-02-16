@@ -2,6 +2,8 @@
 
 AI-powered git commit message, changelog & documentation generator using [opencode.ai](https://opencode.ai)
 
+[![Built with Jules](https://img.shields.io/badge/Built%20with-Jules-715cd7?link=https://jules.google)](https://jules.google)
+
 ```
 ┌   oc 
 │
